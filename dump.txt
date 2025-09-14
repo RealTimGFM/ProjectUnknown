@@ -1,0 +1,783 @@
+================================================================================
+PROJECT SUMMARY
+================================================================================
+
+Generated: 2025-09-14T04:33:24Z
+Root: C:\Users\User\Documents\GitHub\ProjectUnknown
+Python: 3.13.5
+
+================================================================================
+PROJECT TREE
+================================================================================
+
+ProjectUnknown/
+├── templates/
+│   └── index.html
+├── uploads/
+│   └── QuyVuLuong_CV.pdf
+├── .gitattributes
+├── backend.py
+├── database.db
+├── dump.txt
+├── dump_project.py
+├── README.md
+└── resume_parser.py
+
+Directories: 2  Files: 9
+
+================================================================================
+FILE CONTENTS
+================================================================================
+
+================================================================================
+// Path: README.md
+================================================================================
+
+
+
+================================================================================
+// Path: backend.py
+================================================================================
+
+# backend.py
+from flask import Flask, request, render_template, jsonify
+import sqlite3, os, json
+from resume_parser import parse_resume
+
+app = Flask(__name__)
+DB_PATH = "database.db"
+
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            summary TEXT,
+            education TEXT,   -- JSON
+            experience TEXT,  -- JSON
+            projects TEXT,    -- JSON
+            skills TEXT,      -- CSV
+            languages TEXT,   -- CSV
+            raw_text TEXT
+        )"""
+    )
+    conn.commit()
+    conn.close()
+
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    if request.method == "POST":
+        file = request.files.get("resume")
+        if file:
+            os.makedirs("uploads", exist_ok=True)
+            path = os.path.join("uploads", file.filename)
+            file.save(path)
+
+            parsed = parse_resume(path)
+
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute(
+                """INSERT INTO candidates 
+                   (name, summary, education, experience, projects, skills, languages, raw_text)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (
+                    parsed["name"],
+                    parsed.get("summary", ""),
+                    json.dumps(parsed.get("education", []), ensure_ascii=False),
+                    json.dumps(parsed.get("experience", []), ensure_ascii=False),
+                    json.dumps(parsed.get("projects", []), ensure_ascii=False),
+                    parsed.get("skills", ""),
+                    parsed.get("languages", ""),
+                    parsed.get("raw_text", ""),
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+    # fetch
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, name, summary, education, experience, projects, skills, languages FROM candidates ORDER BY id DESC"
+    )
+    rows = c.fetchall()
+    conn.close()
+
+    # pass json module so we can json.loads in template
+    return render_template("index.html", candidates=rows, json=json)
+
+
+@app.post("/update/<int:cand_id>")
+def update_candidate(cand_id: int):
+    payload = request.get_json(force=True, silent=True) or {}
+    # Only accept fields we know
+    name = payload.get("name", "")
+    summary = payload.get("summary", "")
+    education = json.dumps(payload.get("education", []), ensure_ascii=False)
+    experience = json.dumps(payload.get("experience", []), ensure_ascii=False)
+    projects = json.dumps(payload.get("projects", []), ensure_ascii=False)
+    skills = payload.get("skills", "")
+    languages = payload.get("languages", "")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        """UPDATE candidates SET
+           name=?, summary=?, education=?, experience=?, projects=?, skills=?, languages=?
+           WHERE id=?""",
+        (name, summary, education, experience, projects, skills, languages, cand_id),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+if __name__ == "__main__":
+    init_db()
+    app.run(debug=True)
+
+
+================================================================================
+// Path: dump.txt
+================================================================================
+
+
+
+================================================================================
+// Path: dump_project.py
+================================================================================
+
+import os
+import sys
+import argparse
+from datetime import datetime
+from typing import Iterable, List, Set, Tuple
+
+# ---------- Defaults tuned for StockAI ----------
+DEFAULT_ROOT = "."
+DEFAULT_OUTPUT = "dump.txt"
+DEFAULT_MAX_FILE_SIZE = 1 * 1024 * 1024  # 1 MB
+
+# Folders we usually exclude from **tree** to avoid noise; use --tree-all to include anyway
+TREE_EXCLUDE_ANYWHERE: Set[str] = {".git", ".venv", "__pycache__", ".idea", ".vscode"}
+
+# Folders we exclude from **content**, but still show in the tree
+CONTENT_EXCLUDE_ANYWHERE: Set[str] = {
+    ".git", ".venv", "__pycache__", ".idea", ".vscode", "node_modules",
+    "dist", "build", ".mastra",
+    # project artifacts
+    "backtests", "notebooks",
+}
+
+# Filenames to ignore for content
+IGNORE_FILES_ANYWHERE: Set[str] = {
+    ".env", ".env.local", ".python-version", "Pipfile.lock",
+    "package-lock.json", "tsconfig.json", "cookies.txt",
+}
+
+# Always include these names (even without extensions) in content
+INCLUDE_FILENAMES: Set[str] = {"Makefile", "Dockerfile"}
+
+# Binary-ish extensions (content skipped; still listed in tree)
+BINARY_EXTS: Set[str] = {
+    # archives / binaries
+    ".zip", ".gz", ".tar", ".rar", ".7z", ".exe", ".dll", ".so", ".a",
+    # db / parquet / arrow
+    ".sqlite", ".sqlite3", ".db", ".db-journal", ".parquet", ".arrow",
+    # images
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".ico", ".webp",
+    # docs
+    ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
+    # audio/video
+    ".mp3", ".wav", ".m4a", ".mp4", ".mov", ".avi", ".mkv",
+}
+
+# Text/code extensions included by default for content
+DEFAULT_INCLUDE_EXTS: Set[str] = {
+    ".py", ".toml", ".yaml", ".yml", ".json", ".md", ".txt", ".cfg", ".ini",
+    ".sql", ".sh", ".bat", ".ps1",
+}
+# ------------------------------------------------
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Dump project TREE + text/code contents into a single file.")
+    p.add_argument("--root", default=DEFAULT_ROOT, help="Root directory to scan")
+    p.add_argument("--output", default=DEFAULT_OUTPUT, help="Output file path")
+    p.add_argument("--max-size", type=int, default=DEFAULT_MAX_FILE_SIZE, help="Max file size (bytes) for content")
+    p.add_argument("--include-ext", default=",".join(sorted(DEFAULT_INCLUDE_EXTS)),
+                   help="Comma-separated list of file extensions to include as content (e.g. .py,.toml,.yaml)")
+    p.add_argument("--tree-all", action="store_true", help="Include ALL directories in the tree (even .git/.venv)")
+    p.add_argument("--no-content", action="store_true", help="Only print the tree (no file contents)")
+    p.add_argument("--placeholders", action="store_true",
+                   help="Write placeholder blocks for skipped files (binary/large/not-included)")
+    return p.parse_args()
+
+def _normalize_exts(s: str) -> Set[str]:
+    exts = set()
+    for raw in s.split(","):
+        e = raw.strip()
+        if not e:
+            continue
+        if not e.startswith("."):
+            e = "." + e
+        exts.add(e.lower())
+    return exts
+
+def is_probably_binary(filepath: str, chunk_size: int = 1024) -> bool:
+    try:
+        with open(filepath, "rb") as f:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                return False
+            if b"\0" in chunk:
+                return True
+            text_chars = bytearray({7,8,9,10,12,13,27} | set(range(0x20, 0x100)) - {0x7F})
+            non_text = sum(1 for b in chunk if b not in text_chars)
+            return (non_text / max(1, len(chunk))) > 0.30
+    except Exception:
+        return True
+
+def should_hide_in_tree(name: str, include_all: bool) -> bool:
+    return (name in TREE_EXCLUDE_ANYWHERE) and (not include_all)
+
+def should_skip_content_dir(name: str) -> bool:
+    return name in CONTENT_EXCLUDE_ANYWHERE
+
+def should_include_content(fname: str, include_exts: Set[str]) -> bool:
+    if fname in INCLUDE_FILENAMES:
+        return True
+    base, ext = os.path.splitext(fname)
+    ext = ext.lower()
+    if ext in BINARY_EXTS:
+        return False
+    if include_exts and ext not in include_exts:
+        return False
+    return True
+
+def tree_lines(root: str, include_all: bool) -> Tuple[List[str], int, int]:
+    """
+    Return (lines, dir_count, file_count) for a pretty tree.
+    """
+    lines: List[str] = []
+    dir_count = 0
+    file_count = 0
+
+    def walk(dir_path: str, prefix: str = ""):
+        nonlocal dir_count, file_count
+        try:
+            entries = sorted(os.scandir(dir_path), key=lambda e: (not e.is_dir(), e.name.lower()))
+        except PermissionError:
+            return
+        # filter only for tree display
+        entries = [e for e in entries if not (e.is_dir() and should_hide_in_tree(e.name, include_all))]
+        total = len(entries)
+        for idx, e in enumerate(entries):
+            connector = "└── " if idx == total - 1 else "├── "
+            if e.is_dir():
+                lines.append(f"{prefix}{connector}{e.name}/")
+                dir_count += 1
+                next_prefix = f"{prefix}{'    ' if idx == total - 1 else '│   '}"
+                walk(e.path, next_prefix)
+            else:
+                file_count += 1
+                lines.append(f"{prefix}{connector}{e.name}")
+
+    root_label = os.path.basename(os.path.abspath(root)) or root
+    lines.append(f"{root_label}/")
+    walk(root)
+    return lines, dir_count, file_count
+
+def write_header(dump, title: str):
+    sep = "=" * max(80, len(title) + 10)
+    dump.write(f"{sep}\n")
+    dump.write(f"{title}\n")
+    dump.write(f"{sep}\n\n")
+
+def write_file_header(dump, rel_path: str):
+    header = f"// Path: {rel_path}"
+    sep_len = max(80, len(header))
+    dump.write("=" * sep_len + "\n")
+    dump.write(header + "\n")
+    dump.write("=" * sep_len + "\n\n")
+
+def iter_all_files(root: str) -> Iterable[str]:
+    for cur_root, dirs, files in os.walk(root, topdown=True):
+        dirs[:] = sorted(dirs)
+        for fname in sorted(files):
+            yield os.path.join(cur_root, fname)
+
+def main():
+    args = parse_args()
+    root = args.root
+    out_path = args.output
+    include_exts = _normalize_exts(args.include_ext)
+
+    if not os.path.isdir(root):
+        print(f"ERROR: root directory not found: {root}")
+        sys.exit(1)
+
+    with open(out_path, "w", encoding="utf-8", errors="ignore") as dump:
+        # 1) Project metadata
+        write_header(dump, "PROJECT SUMMARY")
+        dump.write(f"Generated: {datetime.utcnow().isoformat(timespec='seconds')}Z\n")
+        dump.write(f"Root: {os.path.abspath(root)}\n")
+        dump.write(f"Python: {sys.version.split()[0]}\n\n")
+
+        # 2) Tree
+        write_header(dump, "PROJECT TREE")
+        lines, dcnt, fcnt = tree_lines(root, include_all=args.tree_all)
+        dump.write("\n".join(lines) + "\n\n")
+        dump.write(f"Directories: {dcnt}  Files: {fcnt}\n\n")
+
+        if args.no_content:
+            print(f"Done (tree only). Wrote {out_path}")
+            return
+
+        # 3) File contents (text/code only)
+        write_header(dump, "FILE CONTENTS")
+        processed = 0
+        skipped = 0
+
+        for fpath in iter_all_files(root):
+            rel = os.path.relpath(fpath, root).replace("\\", "/")
+            fname = os.path.basename(fpath)
+            parent = os.path.basename(os.path.dirname(fpath))
+
+            # Skip content if under excluded dirs
+            if parent in CONTENT_EXCLUDE_ANYWHERE or any(p in CONTENT_EXCLUDE_ANYWHERE for p in rel.split("/") if p):
+                # still optionally write placeholder
+                if args.placeholders:
+                    write_file_header(dump, rel)
+                    dump.write(f"// [skipped: directory excluded from content]\n\n")
+                skipped += 1
+                continue
+
+            # Skip content by rule
+            if not should_include_content(fname, include_exts):
+                if args.placeholders:
+                    write_file_header(dump, rel)
+                    dump.write(f"// [skipped: extension not in include list]\n\n")
+                skipped += 1
+                continue
+
+            # Size & binary checks
+            try:
+                size = os.path.getsize(fpath)
+            except OSError as e:
+                if args.placeholders:
+                    write_file_header(dump, rel)
+                    dump.write(f"// [skipped: stat error: {e}]\n\n")
+                skipped += 1
+                continue
+
+            if size > args.max_size:
+                if args.placeholders:
+                    write_file_header(dump, rel)
+                    dump.write(f"// [skipped: large file ~{size} bytes]\n\n")
+                skipped += 1
+                continue
+
+            if is_probably_binary(fpath):
+                if args.placeholders:
+                    write_file_header(dump, rel)
+                    dump.write(f"// [skipped: binary-like file]\n\n")
+                skipped += 1
+                continue
+
+            # Emit content
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="ignore") as src:
+                    content = src.read()
+                write_file_header(dump, rel)
+                dump.write(content)
+                dump.write("\n\n")
+                processed += 1
+                if processed % 50 == 0:
+                    print(f"... wrote {processed} files")
+            except Exception as e:
+                if args.placeholders:
+                    write_file_header(dump, rel)
+                    dump.write(f"// [skipped: read error: {e}]\n\n")
+                skipped += 1
+                continue
+
+        dump.write(f"\n// Summary: wrote {processed} files, skipped {skipped} files.\n")
+
+    print(f"Done. TREE + contents written to {out_path}")
+
+if __name__ == "__main__":
+    main()
+
+
+================================================================================
+// Path: resume_parser.py
+================================================================================
+
+# resume_parser.py
+import re
+import pdfplumber
+from dateutil import parser as dateparser
+from typing import List, Dict, Tuple
+
+# === helpers ===
+MONTHS = r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*"
+YEAR = r"(19|20)\d{2}"
+DATE_RE = re.compile(
+    rf"(?P<start>({MONTHS}\s+{YEAR}|{YEAR}))\s*[-–—]\s*(?P<end>({MONTHS}\s+{YEAR}|{YEAR}|Present|Current))",
+    re.IGNORECASE,
+)
+
+TECH_SKILLS = {
+    # add more as needed
+    "python",
+    "java",
+    "c++",
+    "c#",
+    "javascript",
+    "typescript",
+    "html",
+    "css",
+    "sql",
+    "nosql",
+    "react",
+    "node",
+    "express",
+    "django",
+    "flask",
+    "fastapi",
+    "pandas",
+    "numpy",
+    "scikit-learn",
+    "pytorch",
+    "tensorflow",
+    "docker",
+    "kubernetes",
+    "aws",
+    "gcp",
+    "azure",
+    "postgres",
+    "mysql",
+    "sqlite",
+    "git",
+    "linux",
+    "bash",
+}
+SOFT_SKILLS = {
+    "leadership",
+    "communication",
+    "teamwork",
+    "problem solving",
+    "adaptability",
+    "mentoring",
+    "ownership",
+    "collaboration",
+}
+
+SECTION_ALIASES = {
+    "SUMMARY": {"summary", "professional summary", "profile"},
+    "EXPERIENCE": {
+        "experience",
+        "work experience",
+        "employment",
+        "employment history",
+        "professional experience",
+    },
+    "EDUCATION": {"education", "academic background"},
+    "PROJECTS": {"projects", "personal projects", "notable projects"},
+    "SKILLS": {"skills", "technical skills"},
+    "LANGUAGES": {"languages", "spoken languages"},
+}
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", s or "").strip()
+
+
+def _which_section(line: str) -> str | None:
+    up = _norm(line).lower()
+    for key, aliases in SECTION_ALIASES.items():
+        if up in aliases:
+            return key
+    return None
+
+
+def _read_pdf_text(path: str) -> str:
+    text = ""
+    with pdfplumber.open(path) as pdf:
+        for p in pdf.pages:
+            t = p.extract_text() or ""
+            text += t + "\n"
+    return text
+
+
+def _split_sections(text: str) -> dict[str, List[str]]:
+    sections: dict[str, List[str]] = {}
+    current = None
+    for raw in text.splitlines():
+        line = _norm(raw)
+        if not line:
+            continue
+        sec = _which_section(line)
+        if sec:
+            current = sec
+            sections.setdefault(current, [])
+            continue
+        if current:
+            sections[current].append(line)
+    return sections
+
+
+def _parse_date_range(s: str) -> Tuple[str | None, str | None, int | None]:
+    m = DATE_RE.search(s)
+    if not m:
+        return None, None, None
+    start_raw = m.group("start")
+    end_raw = m.group("end")
+    try:
+        start_dt = dateparser.parse(
+            start_raw, fuzzy=True, default=dateparser.parse("Jan 1 2000")
+        )
+    except Exception:
+        start_dt = None
+    end_dt = None
+    if end_raw and re.search(r"present|current", end_raw, re.I) is None:
+        try:
+            end_dt = dateparser.parse(
+                end_raw, fuzzy=True, default=dateparser.parse("Jan 1 2000")
+            )
+        except Exception:
+            end_dt = None
+    duration = None
+    if start_dt and end_dt:
+        duration = (end_dt.year - start_dt.year) * 12 + (end_dt.month - start_dt.month)
+    return (start_raw if start_raw else None, end_raw if end_raw else None, duration)
+
+
+def _extract_skills(text: str) -> Tuple[str, str]:
+    low = text.lower()
+    tech_found = sorted(
+        {w for w in TECH_SKILLS if re.search(rf"\b{re.escape(w)}\b", low)}
+    )
+    soft_found = sorted(
+        {w for w in SOFT_SKILLS if re.search(rf"\b{re.escape(w)}\b", low)}
+    )
+    return (", ".join(tech_found), ", ".join(soft_found))
+
+
+# === education parsing ===
+def _parse_education(lines: List[str]) -> List[Dict]:
+    items: List[Dict] = []
+    buf: List[str] = []
+
+    def flush():
+        if not buf:
+            return
+        block = " | ".join(buf)
+        # degree/level
+        m_deg = re.search(
+            r"(High School Diploma|Diploma|Associate|Bachelor(?:'s)?|Master(?:'s)?|BSc|MSc|B\.?Eng|M\.?Eng|PhD|Doctorate)",
+            block,
+            re.I,
+        )
+        degree = m_deg.group(1) if m_deg else ""
+        # field/major
+        m_field = re.search(r"(in|of)\s+([A-Za-z &/+-]{2,})", block, re.I)
+        field = _norm(m_field.group(2)) if m_field else ""
+        # years
+        start, end, _ = _parse_date_range(block)
+        # school (best-effort: take first comma-separated chunk that isn’t degree/field)
+        parts = [p.strip() for p in re.split(r"[|•\-–—]", block) if p.strip()]
+        school = ""
+        location = ""
+        for p in parts:
+            if degree and degree.lower() in p.lower():
+                continue
+            if field and field.lower() in p.lower():
+                continue
+            # likely "University of X, City"
+            if re.search(r"(University|College|School|Institute)", p, re.I):
+                school = p
+                break
+        # location heuristics
+        m_loc = re.search(r"\b([A-Z][a-z]+(?:,?\s+[A-Z][a-z]+)+)\b", block)
+        if m_loc:
+            location = m_loc.group(1)
+        items.append(
+            {
+                "level": _norm(degree),
+                "field": _norm(field),
+                "school_name": _norm(school),
+                "location": _norm(location),
+                "start_year": start,
+                "end_year": end,
+            }
+        )
+        buf.clear()
+
+    for ln in lines:
+        # a new education entry often starts with a degree or school name
+        if (
+            re.search(
+                r"(University|College|School|Institute|BSc|MSc|Bachelor|Master|PhD|Diploma)",
+                ln,
+                re.I,
+            )
+            and buf
+        ):
+            flush()
+        buf.append(ln)
+    flush()
+    return [e for e in items if any(e.values())]
+
+
+# === experience parsing ===
+def _parse_experience(lines: List[str]) -> List[Dict]:
+    items: List[Dict] = []
+    cur: Dict | None = None
+    bullet_re = re.compile(r"^(\s*[-*•]\s+)")
+    for ln in lines:
+        # header line with date range
+        if DATE_RE.search(ln):
+            # start a new entry
+            if cur:
+                items.append(cur)
+            start, end, dur = _parse_date_range(ln)
+            # Try to split "Role — Company — Location"
+            head = DATE_RE.split(ln)[0].strip(" -–—|")
+            parts = [p.strip() for p in re.split(r"[|•\-–—]", head) if p.strip()]
+            position = parts[0] if parts else ""
+            company = parts[1] if len(parts) > 1 else ""
+            location = parts[2] if len(parts) > 2 else ""
+            cur = {
+                "position": _norm(position),
+                "company_name": _norm(company),
+                "location": _norm(location),
+                "start_date": start,
+                "end_date": end,
+                "duration_months": dur,
+                "description": "",
+                "skills_used_tech": [],
+                "skills_used_soft": [],
+            }
+            continue
+
+        # description/bullets
+        if cur:
+            line_clean = bullet_re.sub("", ln)
+            cur["description"] = (
+                cur["description"] + ("\n" if cur["description"] else "") + line_clean
+            ).strip()
+            # accumulate skills on the fly
+            tech_csv, soft_csv = _extract_skills(line_clean)
+            if tech_csv:
+                cur["skills_used_tech"].extend(
+                    [s.strip() for s in tech_csv.split(",") if s.strip()]
+                )
+            if soft_csv:
+                cur["skills_used_soft"].extend(
+                    [s.strip() for s in soft_csv.split(",") if s.strip()]
+                )
+        else:
+            # a stray line before any header: skip
+            pass
+
+    if cur:
+        # dedupe skills
+        cur["skills_used_tech"] = sorted(list(set(cur["skills_used_tech"])))
+        cur["skills_used_soft"] = sorted(list(set(cur["skills_used_soft"])))
+        items.append(cur)
+
+    # final dedupe for all entries
+    for e in items:
+        e["skills_used_tech"] = sorted(list(set(e.get("skills_used_tech", []))))
+        e["skills_used_soft"] = sorted(list(set(e.get("skills_used_soft", []))))
+    return items
+
+
+# === project parsing (light) ===
+def _parse_projects(lines: List[str]) -> List[Dict]:
+    items: List[Dict] = []
+    buf: List[str] = []
+
+    def flush(title_guess=""):
+        if not buf and not title_guess:
+            return
+        text = "\n".join(buf).strip()
+        items.append(
+            {
+                "title": title_guess or (text.split("\n")[0][:80] if text else ""),
+                "description": text,
+            }
+        )
+        buf.clear()
+
+    for ln in lines:
+        if DATE_RE.search(ln) and buf:
+            flush(title_guess=buf[0] if buf else "")
+            buf = []
+        buf.append(ln)
+    flush(title_guess=buf[0] if buf else "")
+    return items
+
+
+# === public API ===
+def parse_resume(filepath: str) -> Dict:
+    text = _read_pdf_text(filepath)
+    lines = [l for l in (text or "").splitlines()]
+
+    # first non-empty line is often the name
+    name = "Unknown"
+    for l in lines:
+        if _norm(l):
+            name = _norm(l)
+            break
+
+    sections = _split_sections(text)
+    education = _parse_education(sections.get("EDUCATION", []))
+    experience = _parse_experience(sections.get("EXPERIENCE", []))
+    projects = _parse_projects(sections.get("PROJECTS", []))
+
+    # whole-document skills / languages (fallback)
+    skills_tech_doc, skills_soft_doc = _extract_skills(text)
+    langs_line = " ".join(sections.get("LANGUAGES", []))
+    langs = (
+        ", ".join([w.strip() for w in re.split(r"[•,;/|]", langs_line) if w.strip()])
+        if langs_line
+        else ""
+    )
+
+    # summary is everything between name and first section header
+    summary_lines = []
+    hit_first_section = False
+    for l in lines:
+        if _which_section(l):
+            hit_first_section = True
+            break
+        if _norm(l) and _norm(l) != name:
+            summary_lines.append(_norm(l))
+    summary = (
+        " ".join(summary_lines[:5])
+        if not hit_first_section
+        else " ".join(summary_lines)
+    )
+
+    # ensure required keys
+    return {
+        "name": name,
+        "summary": summary,
+        "education": education,  # list[dict]
+        "experience": experience,  # list[dict] with skills_used_{tech,soft}
+        "projects": projects,  # list[dict]
+        "skills": skills_tech_doc,  # CSV (technical)
+        "languages": langs,  # CSV
+        "raw_text": text or "",
+    }
+
+
+
+// Summary: wrote 5 files, skipped 34 files.

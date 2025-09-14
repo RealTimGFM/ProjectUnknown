@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>ATS Scanner</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>
+        :root {
+            --bg: #f5f7fb;
+            --card: #fff;
+            --muted: #6b7280;
+            --accent: #2563eb;
+            --border: #e5e7eb;
+        }
+
+        body {
+            margin: 0;
+            font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+            background: var(--bg);
+        }
+
+        header {
+            padding: 20px;
+            background: #0f172a;
+            color: #fff;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 20px;
+        }
+
+        main {
+            max-width: 1100px;
+            margin: 20px auto;
+            padding: 0 16px;
+        }
+
+        .upload {
+            background: var(--card);
+            padding: 16px;
+            border-radius: 12px;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.06);
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .upload input[type=file] {
+            flex: 1;
+        }
+
+        .upload button {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 10px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 18px;
+            margin: 16px 0;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            gap: 12px;
+        }
+
+        .col-6 {
+            grid-column: span 6;
+        }
+
+        .col-4 {
+            grid-column: span 4;
+        }
+
+        .col-12 {
+            grid-column: span 12;
+        }
+
+        label {
+            font-size: 12px;
+            color: var(--muted);
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: #fff;
+        }
+
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            background: #eef2ff;
+            color: #3730a3;
+            border-radius: 999px;
+            font-size: 12px;
+            margin-right: 6px;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .btn {
+            border: 1px solid var(--border);
+            background: #fff;
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .btn.primary {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+
+        .section {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px dashed var(--border);
+        }
+
+        .muted {
+            color: var(--muted);
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>ATS Scanner — Structured Resume Parser</h1>
+    </header>
+    <main>
+        <form class="upload" method="POST" enctype="multipart/form-data">
+            <input type="file" name="resume" accept=".pdf,.doc,.docx" required>
+            <button type="submit">Upload & Parse</button>
+        </form>
+
+        {% for c in candidates %}
+        {% set cid = c[0] %}
+        {% set name = c[1] %}
+        {% set summary = c[2] or "" %}
+        {% set edu = json.loads(c[3] or "[]") %}
+        {% set exp = json.loads(c[4] or "[]") %}
+        {% set pro = json.loads(c[5] or "[]") %}
+        {% set skills = c[6] or "" %}
+        {% set langs = c[7] or "" %}
+
+        <div class="card" id="card-{{cid}}">
+            <div class="row" style="justify-content:space-between;">
+                <h2 style="margin:0">{{ name or "Unnamed Candidate" }}</h2>
+                <div>
+                    <span class="badge">ID #{{cid}}</span>
+                    <button class="btn btn-edit" data-cid="{{ cid }}">Edit</button>
+                    <button class="btn primary btn-save" data-cid="{{ cid }}">Save Changes</button>
+                </div>
+            </div>
+
+            <div class="grid section">
+                <div class="col-12">
+                    <label>Full Name</label>
+                    <input id="name-{{cid}}" value="{{ name }}">
+                </div>
+                <div class="col-12">
+                    <label>Summary</label>
+                    <textarea id="summary-{{cid}}">{{ summary }}</textarea>
+                </div>
+            </div>
+
+            <div class="section">
+                <h3>Experience</h3>
+                {% if exp|length == 0 %}<p class="muted">No experience parsed.</p>{% endif %}
+                {% for e in exp %}
+                <div class="grid" style="margin-bottom:12px;" data-exp="{{loop.index0}}">
+                    <div class="col-4">
+                        <label>Position</label>
+                        <input id="exp-{{cid}}-{{loop.index0}}-position" value="{{ e.get('position','') }}">
+                    </div>
+                    <div class="col-4">
+                        <label>Company</label>
+                        <input id="exp-{{cid}}-{{loop.index0}}-company_name"
+                            value="{{ e.get('company_name', e.get('company','')) }}">
+                    </div>
+                    <div class="col-4">
+                        <label>Location</label>
+                        <input id="exp-{{cid}}-{{loop.index0}}-location" value="{{ e.get('location','') }}">
+                    </div>
+                    <div class="col-4">
+                        <label>Start Date</label>
+                        <input id="exp-{{cid}}-{{loop.index0}}-start_date" value="{{ e.get('start_date','') }}">
+                    </div>
+                    <div class="col-4">
+                        <label>End Date</label>
+                        <input id="exp-{{cid}}-{{loop.index0}}-end_date" value="{{ e.get('end_date','') }}">
+                    </div>
+                    <div class="col-4">
+                        <label>Duration (months)</label>
+                        <input id="exp-{{cid}}-{{loop.index0}}-duration_months"
+                            value="{{ e.get('duration_months','') }}">
+                    </div>
+                    <div class="col-6">
+                        <label>Skills Used (Technical)</label>
+                        <input id="exp-{{cid}}-{{loop.index0}}-skills_used_tech"
+                            value="{{ (e.get('skills_used_tech') or []) | join(', ') }}">
+                    </div>
+                    <div class="col-6">
+                        <label>Skills Used (Soft)</label>
+                        <input id="exp-{{cid}}-{{loop.index0}}-skills_used_soft"
+                            value="{{ (e.get('skills_used_soft') or []) | join(', ') }}">
+                    </div>
+                    <div class="col-12">
+                        <label>Role Description</label>
+                        <textarea id="exp-{{cid}}-{{loop.index0}}-description">{{ e.get('description','') }}</textarea>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="section">
+                <h3>Education</h3>
+                {% if edu|length == 0 %}<p class="muted">No education parsed.</p>{% endif %}
+                {% for ed in edu %}
+                <div class="grid" style="margin-bottom:12px;" data-edu="{{loop.index0}}">
+                    <div class="col-4">
+                        <label>Level</label>
+                        <input id="edu-{{cid}}-{{loop.index0}}-level"
+                            value="{{ ed.get('level', ed.get('degree','')) }}">
+                    </div>
+                    <div class="col-4">
+                        <label>Field</label>
+                        <input id="edu-{{cid}}-{{loop.index0}}-field" value="{{ ed.get('field','') }}">
+                    </div>
+                    <div class="col-4">
+                        <label>School</label>
+                        <input id="edu-{{cid}}-{{loop.index0}}-school_name"
+                            value="{{ ed.get('school_name', ed.get('school','')) }}">
+                    </div>
+                    <div class="col-6">
+                        <label>Location</label>
+                        <input id="edu-{{cid}}-{{loop.index0}}-location" value="{{ ed.get('location','') }}">
+                    </div>
+                    <div class="col-3">
+                        <label>Start Year</label>
+                        <input id="edu-{{cid}}-{{loop.index0}}-start_year" value="{{ ed.get('start_year','') }}">
+                    </div>
+                    <div class="col-3">
+                        <label>End Year</label>
+                        <input id="edu-{{cid}}-{{loop.index0}}-end_year" value="{{ ed.get('end_year','') }}">
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="section">
+                <h3>Projects</h3>
+                {% if pro|length == 0 %}<p class="muted">No projects parsed.</p>{% endif %}
+                {% for p in pro %}
+                <div class="grid" style="margin-bottom:12px;" data-pro="{{loop.index0}}">
+                    <div class="col-6">
+                        <label>Title</label>
+                        <input id="pro-{{cid}}-{{loop.index0}}-title" value="{{ p.get('title','') }}">
+                    </div>
+                    <div class="col-6">
+                        <label>When/Notes</label>
+                        <input id="pro-{{cid}}-{{loop.index0}}-when" value="{{ p.get('when','') }}">
+                    </div>
+                    <div class="col-12">
+                        <label>Description</label>
+                        <textarea id="pro-{{cid}}-{{loop.index0}}-description">{{ p.get('description','') }}</textarea>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="grid section">
+                <div class="col-6">
+                    <label>Skills (technical; CSV)</label>
+                    <input id="skills-{{cid}}" value="{{ skills }}">
+                </div>
+                <div class="col-6">
+                    <label>Languages (CSV)</label>
+                    <input id="languages-{{cid}}" value="{{ langs }}">
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </main>
+
+    <script>
+        function toggleEdit(cid) {
+            const card = document.getElementById(`card-${cid}`);
+            const inputs = card.querySelectorAll('input, textarea');
+            const ro = inputs.length ? inputs[0].readOnly : false;
+            inputs.forEach(el => el.readOnly = !ro);
+        }
+
+        function collectList(prefix, cid, attrNames) {
+            const card = document.getElementById(`card-${cid}`);
+            const blocks = [];
+            card.querySelectorAll(`[data-${prefix}]`).forEach(block => {
+                const idx = block.getAttribute(`data-${prefix}`);
+                const obj = {};
+                attrNames.forEach(name => {
+                    const el = document.getElementById(`${prefix}-${cid}-${idx}-${name}`);
+                    obj[name] = el ? el.value : "";
+                });
+                blocks.push(obj);
+            });
+            return blocks;
+        }
+
+        async function saveCandidate(cid) {
+            const name = document.getElementById(`name-${cid}`).value;
+            const summary = document.getElementById(`summary-${cid}`).value;
+
+            const experience = collectList('exp', cid, [
+                'position', 'company_name', 'location', 'start_date', 'end_date', 'duration_months', 'skills_used_tech', 'skills_used_soft', 'description'
+            ]).map(e => {
+                e.duration_months = e.duration_months ? parseInt(e.duration_months, 10) : null;
+                e.skills_used_tech = (e.skills_used_tech || '').split(',').map(s => s.trim()).filter(Boolean);
+                e.skills_used_soft = (e.skills_used_soft || '').split(',').map(s => s.trim()).filter(Boolean);
+                return e;
+            });
+
+            const education = collectList('edu', cid, [
+                'level', 'field', 'school_name', 'location', 'start_year', 'end_year'
+            ]);
+
+            const projects = collectList('pro', cid, ['title', 'when', 'description']);
+
+            const skills = document.getElementById(`skills-${cid}`).value;
+            const languages = document.getElementById(`languages-${cid}`).value;
+
+            const res = await fetch(`/update/${cid}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, summary, education, experience, projects, skills, languages })
+            });
+            alert(res.ok ? 'Saved!' : 'Save failed');
+        }
+
+        // 🔁 Delegated click listeners (no inline JS)
+        document.addEventListener('click', (e) => {
+            const editBtn = e.target.closest('.btn-edit');
+            if (editBtn) {
+                const cid = parseInt(editBtn.dataset.cid, 10);
+                toggleEdit(cid);
+                return;
+            }
+            const saveBtn = e.target.closest('.btn-save');
+            if (saveBtn) {
+                const cid = parseInt(saveBtn.dataset.cid, 10);
+                saveCandidate(cid);
+            }
+        });
+    </script>
+</body>
+
+</html>
