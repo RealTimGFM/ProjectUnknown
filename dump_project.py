@@ -46,7 +46,7 @@ BINARY_EXTS: Set[str] = {
 # Text/code extensions included by default for content
 DEFAULT_INCLUDE_EXTS: Set[str] = {
     ".py", ".toml", ".yaml", ".yml", ".json", ".md", ".txt", ".cfg", ".ini",
-    ".sql", ".sh", ".bat", ".ps1",
+    ".sql", ".sh", ".bat", ".ps1", ".html", ".css", ".js", ".ts", ".tsx", ".jsx",
 }
 # ------------------------------------------------
 

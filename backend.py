@@ -2,10 +2,15 @@
 from flask import Flask, request, render_template, jsonify
 import sqlite3, os, json
 from resume_parser import parse_resume
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 DB_PATH = "database.db"
+ALLOWED_EXTS = {"pdf"}  # add "doc","docx" later if you implement those
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 
+def allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTS
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -31,9 +36,9 @@ def init_db():
 def index():
     if request.method == "POST":
         file = request.files.get("resume")
-        if file:
+        if file and allowed_file(file.filename):
             os.makedirs("uploads", exist_ok=True)
-            path = os.path.join("uploads", file.filename)
+            path = os.path.join("uploads", secure_filename(file.filename))
             file.save(path)
 
             parsed = parse_resume(path)
@@ -57,6 +62,8 @@ def index():
             )
             conn.commit()
             conn.close()
+        else:
+            return render_template("index.html", candidates=[], json=json)
 
     # fetch
     conn = sqlite3.connect(DB_PATH)
