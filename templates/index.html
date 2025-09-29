@@ -1,187 +1,349 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8">
   <title>ATS Scanner</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    :root { --bg:#0b0f1a; --card:#0f1422; --muted:#9aa3af; --accent:#3b82f6; --border:#1f2937; --text:#e5e7eb; }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--text); }
-    header { padding:20px; background:#0a0f1d; border-bottom:1px solid var(--border); }
-    header h1 { margin:0; font-size:20px; }
-    main { max-width:1100px; margin:20px auto; padding:0 16px; }
-    .upload { background:var(--card); padding:16px; border-radius:12px; border:1px solid var(--border); display:flex; gap:12px; align-items:center; }
-    .upload input[type=file]{ flex:1; color:var(--muted); }
-    .upload button{ background:var(--accent); color:#fff; border:none; padding:10px 14px; border-radius:8px; cursor:pointer; }
-    .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px; margin:16px 0; box-shadow:0 2px 10px rgba(0,0,0,0.12); }
-    .grid { display:grid; grid-template-columns: repeat(12, 1fr); gap:12px; }
-    .col-12{ grid-column: span 12; } .col-6{ grid-column: span 6; } .col-4{ grid-column: span 4; } .col-3{ grid-column: span 3; }
-    label { font-size:12px; color:var(--muted); display:block; margin-bottom:6px; }
-    input, textarea { width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; background:#0b1120; color:var(--text); }
-    textarea { min-height:80px; resize:vertical; }
-    .row { display:flex; gap:10px; align-items:center; }
-    .badge { display:inline-block; padding:4px 10px; background:#1f2a44; color:#93c5fd; border-radius:999px; font-size:12px; margin-right:6px; border:1px solid var(--border); }
-    .btn { border:1px solid var(--border); background:#0b1120; color:var(--text); padding:8px 12px; border-radius:8px; cursor:pointer; }
-    .btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
-    .section { margin-top:16px; padding-top:16px; border-top:1px dashed var(--border); }
-    .muted { color:var(--muted); }
+    :root {
+      --bg: #0b0f1a;
+      --card: #0f1422;
+      --muted: #9aa3af;
+      --accent: #3b82f6;
+      --border: #1f2937;
+      --text: #e5e7eb;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    header {
+      padding: 20px;
+      background: #0a0f1d;
+      border-bottom: 1px solid var(--border);
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+
+    main {
+      max-width: 1100px;
+      margin: 20px auto;
+      padding: 0 16px;
+    }
+
+    .upload {
+      background: var(--card);
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .upload input[type=file] {
+      flex: 1;
+      color: var(--muted);
+    }
+
+    .upload button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 10px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      margin: 16px 0;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 12px;
+    }
+
+    .col-12 {
+      grid-column: span 12;
+    }
+
+    .col-6 {
+      grid-column: span 6;
+    }
+
+    .col-4 {
+      grid-column: span 4;
+    }
+
+    .col-3 {
+      grid-column: span 3;
+    }
+
+    label {
+      font-size: 12px;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #0b1120;
+      color: var(--text);
+    }
+
+    textarea {
+      min-height: 80px;
+      resize: vertical;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      background: #1f2a44;
+      color: #93c5fd;
+      border-radius: 999px;
+      font-size: 12px;
+      margin-right: 6px;
+      border: 1px solid var(--border);
+    }
+
+    .btn {
+      border: 1px solid var(--border);
+      background: #0b1120;
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .btn.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .section {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px dashed var(--border);
+    }
+
+    .muted {
+      color: var(--muted);
+    }
   </style>
 </head>
+
 <body>
-  <header><h1>ATS Scanner — Structured Resume Parser</h1></header>
+  <header>
+    <h1>ATS Scanner — Structured Resume Parser</h1>
+  </header>
   <main>
     <form class="upload" method="POST" enctype="multipart/form-data">
       <input type="file" name="resume" accept=".pdf" required>
       <button type="submit">Upload & Parse</button>
     </form>
-
     {% for c in candidates %}
-      {% set cid = c[0] %}
-      {% set name = c[1] %}
-      {% set summary = c[2] or "" %}
-      {% set edu = json.loads(c[3] or "[]") %}
-      {% set exp = json.loads(c[4] or "[]") %}
-      {% set pro = json.loads(c[5] or "[]") %}
-      {% set skills = c[6] or "" %}
+    {% set cid = c[0] %}
+    {% set name = c[1] %}
+    {% set first = c[2] or "" %}
+    {% set middle = c[3] or "" %}
+    {% set last = c[4] or "" %}
+    {% set phone = c[5] or "" %}
+    {% set email = c[6] or "" %}
+    {% set links = (json.loads(c[7] or "[]")) %}
+    {% set edu = json.loads(c[8] or "[]") %}
+    {% set exp = json.loads(c[9] or "[]") %}
+    {% set skills = c[10] or "" %}
 
-      <div class="card" id="card-{{cid}}">
-        <div class="row" style="justify-content:space-between;">
-          <h2 style="margin:0">{{ name or "Unnamed Candidate" }}</h2>
-          <div>
-            <span class="badge">ID #{{cid}}</span>
-            <button type="button" class="btn btn-edit" data-cid="{{ cid }}">Edit</button>
-            <button type="button" class="btn primary btn-save" data-cid="{{ cid }}">Save Changes</button>
-          </div>
+
+
+    <div class="card" id="card-{{cid}}">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0">{{ name or "Unnamed Candidate" }}</h2>
+        <div><span class="badge">ID #{{cid}}</span></div>
+      </div>
+
+      <div class="grid section">
+        <div class="col-4">
+          <label>First Name</label>
+          <input id="first-{{cid}}" value="{{ first }}">
+        </div>
+        <div class="col-4">
+          <label>Middle Name</label>
+          <input id="middle-{{cid}}" value="{{ middle }}">
+        </div>
+        <div class="col-4">
+          <label>Last Name</label>
+          <input id="last-{{cid}}" value="{{ last }}">
         </div>
 
-        <div class="grid section">
-          <div class="col-12">
-            <label>Full Name</label>
-            <input id="name-{{cid}}" value="{{ name }}">
-          </div>
-          <div class="col-12">
-            <label>Summary (contacts only: phone · links · email · location)</label>
-            <textarea id="summary-{{cid}}">{{ summary }}</textarea>
-          </div>
+        <div class="col-6">
+          <label>Phone</label>
+          <input id="phone-{{cid}}" value="{{ phone }}">
+        </div>
+        <div class="col-6">
+          <label>Email</label>
+          <input id="email-{{cid}}" value="{{ email }}">
         </div>
 
-        <div class="section">
-          <h3>Experience</h3>
-          {% if exp|length == 0 %}<p class="muted">No experience parsed.</p>{% endif %}
-          {% for e in exp %}
-          <div class="grid" style="margin-bottom:12px;" data-exp="{{loop.index0}}">
-            <div class="col-4">
-              <label>Position</label>
-              <input id="exp-{{cid}}-{{loop.index0}}-position" value="{{ e.get('position','') }}">
-            </div>
-            <div class="col-4">
-              <label>Company</label>
-              <input id="exp-{{cid}}-{{loop.index0}}-company_name" value="{{ e.get('company_name', e.get('company','')) }}">
-            </div>
-            <div class="col-4">
-              <label>Location</label>
-              <input id="exp-{{cid}}-{{loop.index0}}-location" value="{{ e.get('location','') }}">
-            </div>
-            <div class="col-4">
-              <label>Start Date</label>
-              <input id="exp-{{cid}}-{{loop.index0}}-start_date" value="{{ e.get('start_date','') }}">
-            </div>
-            <div class="col-4">
-              <label>End Date</label>
-              <input id="exp-{{cid}}-{{loop.index0}}-end_date" value="{{ e.get('end_date','') }}">
-            </div>
-            <div class="col-4">
-              <label>Duration (months)</label>
-              <input id="exp-{{cid}}-{{loop.index0}}-duration_months" value="{{ e.get('duration_months','') }}">
-            </div>
-            <div class="col-12">
-              <label>Role Description</label>
-              <textarea id="exp-{{cid}}-{{loop.index0}}-description">{{ e.get('description','') }}</textarea>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-
-        <div class="section">
-          <h3>Education</h3>
-          {% set edu_list = edu if edu|length > 0 else [ {'level':'','field':'','school_name':'','location':'','start_year':'','end_year':''} ] %}
-          {% for ed in edu_list %}
-          <div class="grid" style="margin-bottom:12px;" data-edu="{{loop.index0}}">
-            <div class="col-4">
-              <label>Level</label>
-              <input id="edu-{{cid}}-{{loop.index0}}-level" value="{{ ed.get('level', ed.get('degree','')) }}">
-            </div>
-            <div class="col-4">
-              <label>Field</label>
-              <input id="edu-{{cid}}-{{loop.index0}}-field" value="{{ ed.get('field','') }}">
-            </div>
-            <div class="col-4">
-              <label>School</label>
-              <input id="edu-{{cid}}-{{loop.index0}}-school_name" value="{{ ed.get('school_name', ed.get('school','')) }}">
-            </div>
-            <div class="col-6">
-              <label>Location</label>
-              <input id="edu-{{cid}}-{{loop.index0}}-location" value="{{ ed.get('location','') }}">
-            </div>
-            <div class="col-3">
-              <label>Start Year</label>
-              <input id="edu-{{cid}}-{{loop.index0}}-start_year" value="{{ ed.get('start_year','') }}">
-            </div>
-            <div class="col-3">
-              <label>End Year</label>
-              <input id="edu-{{cid}}-{{loop.index0}}-end_year" value="{{ ed.get('end_year','') }}">
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-
-        <div class="section">
-          <h3>Projects</h3>
-          {% set pro_list = pro if pro|length > 0 else [ {'title':'','when':'','description':''} ] %}
-          {% for p in pro_list %}
-          <div class="grid" style="margin-bottom:12px;" data-pro="{{loop.index0}}">
-            <div class="col-6">
-              <label>Title</label>
-              <input id="pro-{{cid}}-{{loop.index0}}-title" value="{{ p.get('title','') }}">
-            </div>
-            <div class="col-6">
-              <label>When/Notes</label>
-              <input id="pro-{{cid}}-{{loop.index0}}-when" value="{{ p.get('when','') }}">
-            </div>
-            <div class="col-12">
-              <label>Description</label>
-              <textarea id="pro-{{cid}}-{{loop.index0}}-description">{{ p.get('description','') }}</textarea>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-
-        <div class="grid section">
-          <div class="col-12">
-            <label>Skills (technical; CSV)</label>
-            <input id="skills-{{cid}}" value="{{ skills }}">
+        <div class="col-12">
+          <label>Links</label>
+          <div id="links-{{cid}}">
+            {% if links|length == 0 %}
+            <input id="link-{{cid}}-0" value="">
+            {% else %}
+            {% for u in links %}
+            <input id="link-{{cid}}-{{loop.index0}}" value="{{ u }}">
+            {% endfor %}
+            {% endif %}
           </div>
         </div>
       </div>
+
+
+      <div class="section">
+        <h3>Experience</h3>
+        {% if exp|length == 0 %}<p class="muted">No experience parsed.</p>{% endif %}
+        {% for e in exp %}
+        <div class="grid" style="margin-bottom:12px;" data-exp="{{loop.index0}}">
+          <div class="col-4">
+            <label>Position</label>
+            <input id="exp-{{cid}}-{{loop.index0}}-position" value="{{ e.get('position','') }}">
+          </div>
+          <div class="col-4">
+            <label>Company</label>
+            <input id="exp-{{cid}}-{{loop.index0}}-company_name"
+              value="{{ e.get('company_name', e.get('company','')) }}">
+          </div>
+          <div class="col-4">
+            <label>Location</label>
+            <input id="exp-{{cid}}-{{loop.index0}}-location" value="{{ e.get('location','') }}">
+          </div>
+          <div class="col-4">
+            <label>Start Date</label>
+            <input id="exp-{{cid}}-{{loop.index0}}-start_date" value="{{ e.get('start_date','') }}">
+          </div>
+          <div class="col-4">
+            <label>End Date</label>
+            <input id="exp-{{cid}}-{{loop.index0}}-end_date" value="{{ e.get('end_date','') }}">
+          </div>
+          <div class="col-4">
+            <label>Duration (months)</label>
+            <input id="exp-{{cid}}-{{loop.index0}}-duration_months" value="{{ e.get('duration_months','') }}">
+          </div>
+          <div class="col-12">
+            <label>Role Description</label>
+            <textarea id="exp-{{cid}}-{{loop.index0}}-description">{{ e.get('description','') }}</textarea>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="section">
+        <h3>Education</h3>
+        {% set edu_list = edu if edu|length > 0 else [
+        {'level':'','field':'','school_name':'','location':'','start_year':'','end_year':''} ] %}
+        {% for ed in edu_list %}
+        <div class="grid" style="margin-bottom:12px;" data-edu="{{loop.index0}}">
+          <div class="col-4">
+            <label>Level</label>
+            <input id="edu-{{cid}}-{{loop.index0}}-level" value="{{ ed.get('level', ed.get('degree','')) }}">
+          </div>
+          <div class="col-4">
+            <label>Field</label>
+            <input id="edu-{{cid}}-{{loop.index0}}-field" value="{{ ed.get('field','') }}">
+          </div>
+          <div class="col-4">
+            <label>School</label>
+            <input id="edu-{{cid}}-{{loop.index0}}-school_name" value="{{ ed.get('school_name', ed.get('school','')) }}"
+              readonly>
+          </div>
+          <div class="col-6">
+            <label>Location</label>
+            <input id="edu-{{cid}}-{{loop.index0}}-location" value="{{ ed.get('location','') }}">
+          </div>
+          <div class="col-3">
+            <label>Start Year</label>
+            <input id="edu-{{cid}}-{{loop.index0}}-start_year" value="{{ ed.get('start_year','') }}">
+          </div>
+          <div class="col-3">
+            <label>End Year</label>
+            <input id="edu-{{cid}}-{{loop.index0}}-end_year" value="{{ ed.get('end_year','') }}">
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="grid section">
+        <div class="col-12">
+          <label>Skills (technical; CSV)</label>
+          <textarea id="skills-{{cid}}">{{ skills }}</textarea>
+        </div>
+      </div>
+    </div>
     {% endfor %}
+    <div class="card" style="display:flex; justify-content:flex-end;">
+      <button type="button" class="btn primary" id="save-all">Save All Changes</button>
+    </div>
   </main>
 
   <script>
-    function toggleEdit(cid){
-      const card = document.getElementById(`card-${cid}`);
-      const inputs = card.querySelectorAll('input, textarea');
-      const ro = inputs.length ? inputs[0].readOnly : false;
-      inputs.forEach(el => el.readOnly = !ro);
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('input[readonly], textarea[readonly]')
+        .forEach(el => el.removeAttribute('readonly'));
+      const btn = document.getElementById('save-all');
+      if (btn) btn.addEventListener('click', saveAllCandidates);
+    });
+
+    function collectLinks(cid) {
+      const wrap = document.getElementById(`links-${cid}`);
+      const arr = [];
+      if (!wrap) return arr;
+      wrap.querySelectorAll('input[id^="link-"]').forEach(el => {
+        const v = (el.value || "").trim();
+        if (v) arr.push(v);
+      });
+      return arr;
     }
 
-    function collectList(prefix, cid, attrNames){
+    function collectList(prefix, cid, attrNames) {
       const card = document.getElementById(`card-${cid}`);
       const blocks = [];
-      card.querySelectorAll(`[data-${prefix}]`).forEach(block=>{
+      if (!card) return blocks;
+      card.querySelectorAll(`[data-${prefix}]`).forEach(block => {
         const idx = block.getAttribute(`data-${prefix}`);
         const obj = {};
-        attrNames.forEach(name=>{
+        attrNames.forEach(name => {
           const el = document.getElementById(`${prefix}-${cid}-${idx}-${name}`);
           obj[name] = el ? el.value : "";
         });
@@ -190,43 +352,66 @@
       return blocks;
     }
 
-    async function saveCandidate(cid){
-      const name = document.getElementById(`name-${cid}`).value;
-      const summary = document.getElementById(`summary-${cid}`).value;
+    function collectCandidate(cid) {
+      const first = (document.getElementById(`first-${cid}`)?.value || "");
+      const middle = (document.getElementById(`middle-${cid}`)?.value || "");
+      const last = (document.getElementById(`last-${cid}`)?.value || "");
+      const phone = (document.getElementById(`phone-${cid}`)?.value || "");
+      const email = (document.getElementById(`email-${cid}`)?.value || "");
+      const links = collectLinks(cid);
+      const name = [first, middle, last].filter(Boolean).join(' ').trim();
 
       const experience = collectList('exp', cid, [
-        'position','company_name','location','start_date','end_date','duration_months','description'
-      ]).map(e=>{
-        e.duration_months = e.duration_months ? parseInt(e.duration_months,10) : null;
-        e.skills_used_tech = [];  // per your instruction (fill later)
-        e.skills_used_soft = [];
+        'position', 'company_name', 'location', 'start_date', 'end_date', 'duration_months', 'description'
+      ]).map(e => {
+        e.duration_months = e.duration_months ? parseInt(e.duration_months, 10) : null;
+        e.skills_used_tech = e.skills_used_tech || [];
+        e.skills_used_soft = e.skills_used_soft || [];
         return e;
       });
 
       const education = collectList('edu', cid, [
-        'level','field','school_name','location','start_year','end_year'
+        'level', 'field', 'school_name', 'location', 'start_year', 'end_year'
       ]);
 
-      const projects = collectList('pro', cid, ['title','when','description']);
+      const skills = (document.getElementById(`skills-${cid}`)?.value || "");
+      const languages = "";
 
-      const skills = document.getElementById(`skills-${cid}`).value;
-      const languages = ""; // UI removed
-
-      const res = await fetch(`/update/${cid}`, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ name, summary, education, experience, projects, skills, languages })
-      });
-      alert(res.ok ? 'Saved!' : 'Save failed');
+      return {
+        name, first_name: first, middle_name: middle, last_name: last,
+        phone, email, links, education, experience, skills, languages
+      };
     }
 
-    // delegated listeners (no inline events)
-    document.addEventListener('click', (e)=>{
-      const editBtn = e.target.closest('.btn-edit');
-      if (editBtn) { toggleEdit(parseInt(editBtn.dataset.cid,10)); return; }
-      const saveBtn = e.target.closest('.btn-save');
-      if (saveBtn) { saveCandidate(parseInt(saveBtn.dataset.cid,10)); }
-    });
+    async function saveAllCandidates() {
+      const btn = document.getElementById('save-all');
+      if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+      const cards = document.querySelectorAll('.card[id^="card-"]');
+      let ok = 0, fail = 0;
+
+      for (const card of cards) {
+        const cid = parseInt(card.id.replace('card-', ''), 10);
+        const payload = collectCandidate(cid);
+        try {
+          const res = await fetch(`/update/${cid}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (res.ok) ok++; else fail++;
+        } catch {
+          fail++;
+        }
+      }
+
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Save All Changes';
+      }
+      alert(`Saved ${ok} candidate(s)` + (fail ? `, ${fail} failed` : ''));
+    }
   </script>
+
 </body>
+
 </html>

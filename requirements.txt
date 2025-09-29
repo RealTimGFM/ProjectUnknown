@@ -1,6 +1,27 @@
+# --- Web (Flask app you have now) ---
 Flask>=3.0.3
-pdfplumber>=0.11.0
-pdfminer.six>=20240706
-Pillow>=10.2.0
-python-dateutil>=2.9.0.post0
+Werkzeug>=3.0.3
+Jinja2>=3.1.4
+itsdangerous>=2.2.0
+click>=8.1.7
 
+# --- PDF parsing (pip-only) ---
+PyMuPDF>=1.24
+pdfplumber>=0.11
+pdfminer.six>=20231228
+
+# --- OCR fallback (no system deps) ---
+easyocr>=1.7.2
+torch>=2.3          # CPU wheel
+
+# --- NLP / parsing helpers ---
+regex>=2024.9.11
+python-dateutil>=2.9.0.post0
+phonenumbers>=8.13.44
+email-validator>=2.2.0
+
+# --- Optional, pure-Python file type sniffing used in backend.py (safe to keep) ---
+filetype>=1.2.0
+
+# --- Nice-to-have logs ---
+rich>=13.8
