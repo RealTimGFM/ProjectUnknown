@@ -17,7 +17,7 @@ A minimal ATS-style web app:
 - Safe parser (guards against missing sections / malformed bullets).
 
 ---
-
+```powershell
 ## Project Structure
 ProjectUnknown/
 ├─ backend.py # Flask app + DB CRUD
@@ -29,6 +29,7 @@ ProjectUnknown/
 ├─ requirements.txt
 └─ README.md
 ## Quickstart
+```
 
 > Tested on **Python 3.13**. Works on 3.10+.
 
