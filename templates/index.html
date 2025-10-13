@@ -162,13 +162,29 @@
       color: var(--muted);
     }
   </style>
+  {% include "_theme.html" %}
 </head>
 
 <body>
   <header>
-    <h1>ATS Scanner — Structured Resume Parser</h1>
+    <div class="container">
+      <h1>ATS Scanner — Structured Resume Parser</h1>
+    </div>
   </header>
   <main>
+    <nav class="card" style="display:flex; gap:12px; align-items:center; justify-content:space-between;">
+      <div>
+        <a class="btn" href="/">Home</a>
+        <a class="btn" href="/admin">Admin</a>
+        <a class="btn" href="/admin/candidates">All CVs</a>
+      </div>
+      <div>
+        <a class="btn" href="/logout">Log out</a>
+      </div>
+    </nav>
+
+    {% include "_flash.html" %}
+
     <form class="upload" method="POST" enctype="multipart/form-data">
       <input type="file" name="resume" accept=".pdf" required>
       <button type="submit">Upload & Parse</button>

@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    {% include "_theme.html" %}
+    <title>All Candidates</title>
+</head>
+
+<body style="font-family:Inter,system-ui;background:#0b0f1a;color:#e5e7eb">
+    <main style="max-width:1100px;margin:40px auto;padding:16px">
+        {% include "_flash.html" %}
+        <div class="card">
+            <h2>All Candidates</h2>
+            <table style="width:100%;border-collapse:collapse">
+                <thead>
+                    <tr>
+                        <th style="text-align:left;padding:8px;border-bottom:1px solid #1f2937">ID</th>
+                        <th style="text-align:left;padding:8px;border-bottom:1px solid #1f2937">Name</th>
+                        <th style="text-align:left;padding:8px;border-bottom:1px solid #1f2937">Email</th>
+                        <th style="text-align:left;padding:8px;border-bottom:1px solid #1f2937">Phone</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in rows %}
+                    <tr>
+                        <td style="padding:8px;border-bottom:1px solid #1f2937">{{ r[0] }}</td>
+                        <td style="padding:8px;border-bottom:1px solid #1f2937">{{ r[1] }}</td>
+                        <td style="padding:8px;border-bottom:1px solid #1f2937">{{ r[2] }}</td>
+                        <td style="padding:8px;border-bottom:1px solid #1f2937">{{ r[3] }}</td>
+                        <td style="padding:8px;border-bottom:1px solid #1f2937">
+                            <form method="post" action="{{ url_for('admin_delete_candidate', cand_id=r[0]) }}"
+                                onsubmit="return confirm('Delete candidate #{{r[0]}}?')">
+                                <button class="btn" style="border-color:#ef4444">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div style="margin-top:12px">
+                <a class="btn" href="{{ url_for('index') }}">Back to app</a>
+            </div>
+        </div>
+    </main>
+</body>
+
+</html>

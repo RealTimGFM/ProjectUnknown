@@ -2,7 +2,7 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-10-13T02:47:20Z
+Generated: 2025-10-13T20:08:21Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -12,17 +12,28 @@ PROJECT TREE
 
 ProjectUnknown/
 ├── templates/
+│   ├── _flash.html
+│   ├── _theme.html
+│   ├── admin_candidates.html
+│   ├── admin_home.html
+│   ├── auth_login.html
+│   ├── auth_reset_request.html
+│   ├── auth_reset_set.html
+│   ├── auth_signup.html
 │   └── index.html
 ├── uploads/
+│   ├── 2baa2dd8828a421989f7d6a423ba7f44_QuyVuLuong_CV.pdf
+│   └── fea835ae0fc04400ad09025ffb10465e_RutayisireLucienResume_3.pdf
 ├── .gitattributes
 ├── backend.py
+├── database.db
 ├── dump.txt
 ├── dump_project.py
 ├── README.md
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 2  Files: 8
+Directories: 2  Files: 19
 
 ================================================================================
 FILE CONTENTS
@@ -88,10 +99,22 @@ rm database.db          # bash/zsh
 ================================================================================
 
 # backend.py — Flask upload -> parse -> save -> render
-from flask import Flask, request, render_template, jsonify
+from flask import (
+    Flask,
+    request,
+    render_template,
+    jsonify,
+    redirect,
+    url_for,
+    session,
+    flash,
+)
 import sqlite3, os, json, uuid
 from resume_parser import parse_resume
 from werkzeug.utils import secure_filename
+from datetime import timedelta, datetime
+from werkzeug.security import generate_password_hash, check_password_hash
+import secrets
 
 # Optional pure-Python MIME sniff (no system deps). If missing, we just skip.
 try:
@@ -100,6 +123,9 @@ except Exception:
     filetype = None
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+app.permanent_session_lifetime = timedelta(minutes=30)
+IDLE_TIMEOUT_MIN = 15
 DB_PATH = "database.db"
 ALLOWED_EXTS = {"pdf"}
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
@@ -107,6 +133,231 @@ app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTS
+
+
+def current_user():
+    uid = session.get("user_id")
+    if not uid:
+        return None
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, username, is_admin FROM users WHERE id=?", (uid,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"id": row[0], "username": row[1], "is_admin": bool(row[2])}
+
+
+def login_required(fn):
+    from functools import wraps
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not session.get("user_id"):
+            flash("Please log in to continue.", "warn")
+            return redirect(url_for("login", next=request.path))
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def admin_required(fn):
+    from functools import wraps
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        user = current_user()
+        if not user or not user["is_admin"]:
+            flash("Admin access required.", "error")
+            return redirect(url_for("login"))
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+@app.before_request
+def enforce_idle_timeout():
+    now = datetime.utcnow().timestamp()
+    last = session.get("last_seen")
+    if session.get("user_id"):
+        if last and (now - last) > (IDLE_TIMEOUT_MIN * 60):
+            # idle → logout
+            session.clear()
+            flash("You were logged out due to inactivity.", "info")
+            return redirect(url_for("login"))
+        session["last_seen"] = now
+
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        if not username or not password:
+            flash("Username and password are required.", "error")
+            return redirect(url_for("signup"))
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        try:
+            c.execute(
+                "INSERT INTO users (username, password_hash, created_at) VALUES (?,?,?)",
+                (
+                    username,
+                    generate_password_hash(password),
+                    datetime.utcnow().isoformat(),
+                ),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            conn.close()
+            flash("Username already exists.", "error")
+            return redirect(url_for("signup"))
+        # Auto-login after signup
+        c.execute("SELECT id FROM users WHERE username=?", (username,))
+        uid = c.fetchone()[0]
+        conn.close()
+        session.clear()
+        session.permanent = True
+        session["user_id"] = uid
+        session["last_seen"] = datetime.utcnow().timestamp()
+        flash("Account created. Welcome!", "success")
+        return redirect(url_for("index"))
+    return render_template("auth_signup.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        next_url = request.args.get("next") or url_for("index")
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute(
+            "SELECT id, password_hash, is_admin FROM users WHERE username=?",
+            (username,),
+        )
+        row = c.fetchone()
+        conn.close()
+
+        if not row or not check_password_hash(row[1], password):
+            flash("Invalid username or password.", "error")
+            return redirect(url_for("login", next=next_url))
+
+        session.clear()
+        session.permanent = True
+        session["user_id"] = row[0]
+        session["last_seen"] = datetime.utcnow().timestamp()
+        flash("Logged in successfully.", "success")
+        return redirect(next_url)
+    return render_template("auth_login.html", next=request.args.get("next"))
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    flash("Logged out.", "info")
+    return redirect(url_for("login"))
+
+
+@app.route("/reset/request", methods=["GET", "POST"])
+def reset_request():
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT id FROM users WHERE username=?", (username,))
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            flash("If that account exists, a reset token was created.", "info")
+            return redirect(url_for("reset_request"))
+
+        uid = row[0]
+        token = secrets.token_urlsafe(24)
+        expires = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
+        c.execute(
+            "INSERT INTO reset_tokens (user_id, token, expires_at) VALUES (?,?,?)",
+            (uid, token, expires),
+        )
+        conn.commit()
+        conn.close()
+        # For demo: show token and direct link
+        flash(f"Reset token: {token}", "info")
+        flash("Use the link below within 30 minutes.", "info")
+        return redirect(url_for("reset_form", token=token))
+    return render_template("auth_reset_request.html")
+
+
+@app.route("/reset/<token>", methods=["GET", "POST"])
+def reset_form(token):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "SELECT user_id, expires_at, used FROM reset_tokens WHERE token=?", (token,)
+    )
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        flash("Invalid or expired token.", "error")
+        return redirect(url_for("reset_request"))
+    user_id, expires_at, used = row
+    if used:
+        conn.close()
+        flash("This token was already used.", "error")
+        return redirect(url_for("reset_request"))
+    if datetime.utcnow() > datetime.fromisoformat(expires_at):
+        conn.close()
+        flash("Token expired.", "error")
+        return redirect(url_for("reset_request"))
+
+    if request.method == "POST":
+        pw = request.form.get("password") or ""
+        if len(pw) < 6:
+            flash("Password must be at least 6 characters.", "error")
+            return redirect(url_for("reset_form", token=token))
+        c.execute(
+            "UPDATE users SET password_hash=? WHERE id=?",
+            (generate_password_hash(pw), user_id),
+        )
+        c.execute("UPDATE reset_tokens SET used=1 WHERE token=?", (token,))
+        conn.commit()
+        conn.close()
+        flash("Password updated. Please log in.", "success")
+        return redirect(url_for("login"))
+    conn.close()
+    return render_template("auth_reset_set.html", token=token)
+
+
+@app.route("/admin")
+@admin_required
+def admin_home():
+    return redirect(url_for("admin_candidates"))
+
+
+@app.route("/admin/candidates")
+@admin_required
+def admin_candidates():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, name, email, phone FROM candidates ORDER BY id DESC")
+    rows = c.fetchall()
+    conn.close()
+    return render_template("admin_candidates.html", rows=rows)
+
+
+@app.post("/admin/delete/candidate/<int:cand_id>")
+@admin_required
+def admin_delete_candidate(cand_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM candidates WHERE id=?", (cand_id,))
+    conn.commit()
+    conn.close()
+    flash(f"Candidate #{cand_id} deleted.", "success")
+    return redirect(url_for("admin_candidates"))
 
 
 def init_db():
@@ -130,11 +381,49 @@ def init_db():
             raw_text TEXT
         )"""
     )
+    # users table
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            is_admin INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    # password reset tokens
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS reset_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token TEXT UNIQUE NOT NULL,
+            expires_at TEXT NOT NULL,
+            used INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )"""
+    )
     conn.commit()
+    # Seed a default admin once (username: admin, password: 123)
+    c.execute("SELECT 1 FROM users WHERE username='admin'")
+    if not c.fetchone():
+        from datetime import datetime
+        from werkzeug.security import generate_password_hash
+
+        c.execute(
+            "INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?,?,?,?)",
+            (
+                "admin",
+                generate_password_hash("123"),
+                1,
+                datetime.utcnow().isoformat(),
+            ),
+        )
+        conn.commit()
     conn.close()
 
 
 @app.route("/", methods=["GET", "POST"])
+@login_required
 def index():
     if request.method == "POST":
         f = request.files.get("resume")
@@ -189,9 +478,9 @@ def index():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute(
-    "SELECT id, name, first_name, middle_name, last_name, phone, email, links, "
-    "education, experience, skills, languages "
-    "FROM candidates ORDER BY id DESC"
+        "SELECT id, name, first_name, middle_name, last_name, phone, email, links, "
+        "education, experience, skills, languages "
+        "FROM candidates ORDER BY id DESC"
     )
     rows = c.fetchall()
     conn.close()
@@ -199,6 +488,7 @@ def index():
 
 
 @app.post("/update/<int:cand_id>")
+@login_required
 def update_candidate(cand_id: int):
     payload = request.get_json(force=True, silent=True) or {}
     name = payload.get("name", "")
@@ -216,17 +506,27 @@ def update_candidate(cand_id: int):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute(
-    """UPDATE candidates SET
+        """UPDATE candidates SET
         name=?, first_name=?, middle_name=?, last_name=?, phone=?, email=?, links=?,
         education=?, experience=?, skills=?, languages=? WHERE id=?""",
-    (name, first_name, middle_name, last_name, phone, email, links,
-    education, experience, skills, languages, cand_id),
+        (
+            name,
+            first_name,
+            middle_name,
+            last_name,
+            phone,
+            email,
+            links,
+            education,
+            experience,
+            skills,
+            languages,
+            cand_id,
+        ),
     )
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
-
-
 
 
 if __name__ == "__main__":
@@ -238,6 +538,540 @@ if __name__ == "__main__":
 // Path: dump.txt
 ================================================================================
 
+================================================================================
+PROJECT SUMMARY
+================================================================================
+
+Generated: 2025-10-13T20:08:21Z
+Root: C:\Users\User\Documents\GitHub\ProjectUnknown
+Python: 3.13.5
+
+================================================================================
+PROJECT TREE
+================================================================================
+
+ProjectUnknown/
+├── templates/
+│   ├── _flash.html
+│   ├── _theme.html
+│   ├── admin_candidates.html
+│   ├── admin_home.html
+│   ├── auth_login.html
+│   ├── auth_reset_request.html
+│   ├── auth_reset_set.html
+│   ├── auth_signup.html
+│   └── index.html
+├── uploads/
+│   ├── 2baa2dd8828a421989f7d6a423ba7f44_QuyVuLuong_CV.pdf
+│   └── fea835ae0fc04400ad09025ffb10465e_RutayisireLucienResume_3.pdf
+├── .gitattributes
+├── backend.py
+├── database.db
+├── dump.txt
+├── dump_project.py
+├── README.md
+├── requirements.txt
+└── resume_parser.py
+
+Directories: 2  Files: 19
+
+================================================================================
+FILE CONTENTS
+================================================================================
+
+================================================================================
+// Path: README.md
+================================================================================
+
+# Mini ATS — Structured Resume Scanner (Phase)
+
+A minimal ATS-style web app:
+- Upload a **PDF resume**.
+- Backend parses sections and extracts **structured fields** (Experience, Education, Projects).
+- Data is stored in **SQLite** with JSON columns.
+- Web UI shows **text boxes per field**; you can edit and **save** back to DB.
+
+---
+
+## Features
+
+- Section-aware parsing (SUMMARY / EXPERIENCE / EDUCATION / PROJECTS / SKILLS / LANGUAGES).
+- Heuristics for dates and roles; calculates **duration (months)** when possible.
+- Stores arrays (lists of dicts) as **JSON** in SQLite.
+- Inline **edit & save** for each candidate.
+- Safe parser (guards against missing sections / malformed bullets).
+
+---
+```powershell
+## Project Structure
+ProjectUnknown/
+├─ backend.py # Flask app + DB CRUD
+├─ resume_parser.py # PDF → structured JSON (experience/education/projects)
+├─ templates/
+│ └─ index.html # Upload + editable cards UI
+├─ uploads/ # Saved resumes (created on first upload)
+├─ database.db # SQLite (auto-created)
+├─ requirements.txt
+└─ README.md
+## Quickstart
+```
+
+> Tested on **Python 3.13**. Works on 3.10+.
+
+### 1) Create venv & install deps
+**Windows (PowerShell):**
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+python backend.py
+http://127.0.0.1:5000
+# stop the app, then:
+del database.db         # PowerShell
+# or
+rm database.db          # bash/zsh
+# start the app again so it recreates the table
+
+
+================================================================================
+// Path: backend.py
+================================================================================
+
+# backend.py — Flask upload -> parse -> save -> render
+from flask import (
+    Flask,
+    request,
+    render_template,
+    jsonify,
+    redirect,
+    url_for,
+    session,
+    flash,
+)
+import sqlite3, os, json, uuid
+from resume_parser import parse_resume
+from werkzeug.utils import secure_filename
+from datetime import timedelta, datetime
+from werkzeug.security import generate_password_hash, check_password_hash
+import secrets
+
+# Optional pure-Python MIME sniff (no system deps). If missing, we just skip.
+try:
+    import filetype  # pip install filetype
+except Exception:
+    filetype = None
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+app.permanent_session_lifetime = timedelta(minutes=30)
+IDLE_TIMEOUT_MIN = 15
+DB_PATH = "database.db"
+ALLOWED_EXTS = {"pdf"}
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
+
+
+def allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTS
+
+
+def current_user():
+    uid = session.get("user_id")
+    if not uid:
+        return None
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, username, is_admin FROM users WHERE id=?", (uid,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"id": row[0], "username": row[1], "is_admin": bool(row[2])}
+
+
+def login_required(fn):
+    from functools import wraps
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not session.get("user_id"):
+            flash("Please log in to continue.", "warn")
+            return redirect(url_for("login", next=request.path))
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def admin_required(fn):
+    from functools import wraps
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        user = current_user()
+        if not user or not user["is_admin"]:
+            flash("Admin access required.", "error")
+            return redirect(url_for("login"))
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+@app.before_request
+def enforce_idle_timeout():
+    now = datetime.utcnow().timestamp()
+    last = session.get("last_seen")
+    if session.get("user_id"):
+        if last and (now - last) > (IDLE_TIMEOUT_MIN * 60):
+            # idle → logout
+            session.clear()
+            flash("You were logged out due to inactivity.", "info")
+            return redirect(url_for("login"))
+        session["last_seen"] = now
+
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        if not username or not password:
+            flash("Username and password are required.", "error")
+            return redirect(url_for("signup"))
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        try:
+            c.execute(
+                "INSERT INTO users (username, password_hash, created_at) VALUES (?,?,?)",
+                (
+                    username,
+                    generate_password_hash(password),
+                    datetime.utcnow().isoformat(),
+                ),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            conn.close()
+            flash("Username already exists.", "error")
+            return redirect(url_for("signup"))
+        # Auto-login after signup
+        c.execute("SELECT id FROM users WHERE username=?", (username,))
+        uid = c.fetchone()[0]
+        conn.close()
+        session.clear()
+        session.permanent = True
+        session["user_id"] = uid
+        session["last_seen"] = datetime.utcnow().timestamp()
+        flash("Account created. Welcome!", "success")
+        return redirect(url_for("index"))
+    return render_template("auth_signup.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        next_url = request.args.get("next") or url_for("index")
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute(
+            "SELECT id, password_hash, is_admin FROM users WHERE username=?",
+            (username,),
+        )
+        row = c.fetchone()
+        conn.close()
+
+        if not row or not check_password_hash(row[1], password):
+            flash("Invalid username or password.", "error")
+            return redirect(url_for("login", next=next_url))
+
+        session.clear()
+        session.permanent = True
+        session["user_id"] = row[0]
+        session["last_seen"] = datetime.utcnow().timestamp()
+        flash("Logged in successfully.", "success")
+        return redirect(next_url)
+    return render_template("auth_login.html", next=request.args.get("next"))
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    flash("Logged out.", "info")
+    return redirect(url_for("login"))
+
+
+@app.route("/reset/request", methods=["GET", "POST"])
+def reset_request():
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT id FROM users WHERE username=?", (username,))
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            flash("If that account exists, a reset token was created.", "info")
+            return redirect(url_for("reset_request"))
+
+        uid = row[0]
+        token = secrets.token_urlsafe(24)
+        expires = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
+        c.execute(
+            "INSERT INTO reset_tokens (user_id, token, expires_at) VALUES (?,?,?)",
+            (uid, token, expires),
+        )
+        conn.commit()
+        conn.close()
+        # For demo: show token and direct link
+        flash(f"Reset token: {token}", "info")
+        flash("Use the link below within 30 minutes.", "info")
+        return redirect(url_for("reset_form", token=token))
+    return render_template("auth_reset_request.html")
+
+
+@app.route("/reset/<token>", methods=["GET", "POST"])
+def reset_form(token):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "SELECT user_id, expires_at, used FROM reset_tokens WHERE token=?", (token,)
+    )
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        flash("Invalid or expired token.", "error")
+        return redirect(url_for("reset_request"))
+    user_id, expires_at, used = row
+    if used:
+        conn.close()
+        flash("This token was already used.", "error")
+        return redirect(url_for("reset_request"))
+    if datetime.utcnow() > datetime.fromisoformat(expires_at):
+        conn.close()
+        flash("Token expired.", "error")
+        return redirect(url_for("reset_request"))
+
+    if request.method == "POST":
+        pw = request.form.get("password") or ""
+        if len(pw) < 6:
+            flash("Password must be at least 6 characters.", "error")
+            return redirect(url_for("reset_form", token=token))
+        c.execute(
+            "UPDATE users SET password_hash=? WHERE id=?",
+            (generate_password_hash(pw), user_id),
+        )
+        c.execute("UPDATE reset_tokens SET used=1 WHERE token=?", (token,))
+        conn.commit()
+        conn.close()
+        flash("Password updated. Please log in.", "success")
+        return redirect(url_for("login"))
+    conn.close()
+    return render_template("auth_reset_set.html", token=token)
+
+
+@app.route("/admin")
+@admin_required
+def admin_home():
+    return redirect(url_for("admin_candidates"))
+
+
+@app.route("/admin/candidates")
+@admin_required
+def admin_candidates():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, name, email, phone FROM candidates ORDER BY id DESC")
+    rows = c.fetchall()
+    conn.close()
+    return render_template("admin_candidates.html", rows=rows)
+
+
+@app.post("/admin/delete/candidate/<int:cand_id>")
+@admin_required
+def admin_delete_candidate(cand_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM candidates WHERE id=?", (cand_id,))
+    conn.commit()
+    conn.close()
+    flash(f"Candidate #{cand_id} deleted.", "success")
+    return redirect(url_for("admin_candidates"))
+
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,                     -- full display name
+            first_name TEXT,
+            middle_name TEXT,
+            last_name TEXT,
+            phone TEXT,
+            email TEXT,
+            links TEXT,                    -- JSON array of strings
+            education TEXT,                -- JSON
+            experience TEXT,               -- JSON
+            projects TEXT,                 -- JSON
+            skills TEXT,                   -- CSV
+            languages TEXT,                -- CSV
+            raw_text TEXT
+        )"""
+    )
+    # users table
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            is_admin INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    # password reset tokens
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS reset_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token TEXT UNIQUE NOT NULL,
+            expires_at TEXT NOT NULL,
+            used INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )"""
+    )
+    conn.commit()
+    # Seed a default admin once (username: admin, password: 123)
+    c.execute("SELECT 1 FROM users WHERE username='admin'")
+    if not c.fetchone():
+        from datetime import datetime
+        from werkzeug.security import generate_password_hash
+
+        c.execute(
+            "INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?,?,?,?)",
+            (
+                "admin",
+                generate_password_hash("123"),
+                1,
+                datetime.utcnow().isoformat(),
+            ),
+        )
+        conn.commit()
+    conn.close()
+
+
+@app.route("/", methods=["GET", "POST"])
+@login_required
+def index():
+    if request.method == "POST":
+        f = request.files.get("resume")
+        if not (f and allowed_file(f.filename)):
+            return render_template("index.html", candidates=[], json=json)
+
+        os.makedirs("uploads", exist_ok=True)
+        safe = secure_filename(f.filename) or "resume.pdf"
+        uid = uuid.uuid4().hex
+        path = os.path.join("uploads", f"{uid}_{safe}")
+        f.save(path)
+
+        # Optional lightweight MIME check (pip-only; no libmagic)
+        if filetype:
+            kind = filetype.guess(path)
+            if not (kind and kind.mime == "application/pdf"):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+                return render_template("index.html", candidates=[], json=json)
+
+        parsed = parse_resume(path)
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute(
+            """INSERT INTO candidates
+            (name, first_name, middle_name, last_name, phone, email, links,
+                education, experience, skills, languages, raw_text)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                parsed["name"],
+                parsed.get("first_name", ""),
+                parsed.get("middle_name", ""),
+                parsed.get("last_name", ""),
+                parsed.get("phone", ""),
+                parsed.get("email", ""),
+                json.dumps(parsed.get("links", []), ensure_ascii=False),
+                json.dumps(parsed.get("education", []), ensure_ascii=False),
+                json.dumps(parsed.get("experience", []), ensure_ascii=False),
+                parsed.get("skills", ""),
+                parsed.get("languages", ""),
+                parsed.get("raw_text", ""),
+            ),
+        )
+
+        conn.commit()
+        conn.close()
+
+    # fetch list
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, name, first_name, middle_name, last_name, phone, email, links, "
+        "education, experience, skills, languages "
+        "FROM candidates ORDER BY id DESC"
+    )
+    rows = c.fetchall()
+    conn.close()
+    return render_template("index.html", candidates=rows, json=json)
+
+
+@app.post("/update/<int:cand_id>")
+@login_required
+def update_candidate(cand_id: int):
+    payload = request.get_json(force=True, silent=True) or {}
+    name = payload.get("name", "")
+    first_name = payload.get("first_name", "")
+    middle_name = payload.get("middle_name", "")
+    last_name = payload.get("last_name", "")
+    phone = payload.get("phone", "")
+    email = payload.get("email", "")
+    links = json.dumps(payload.get("links", []), ensure_ascii=False)
+    education = json.dumps(payload.get("education", []), ensure_ascii=False)
+    experience = json.dumps(payload.get("experience", []), ensure_ascii=False)
+    skills = payload.get("skills", "")
+    languages = payload.get("languages", "")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        """UPDATE candidates SET
+        name=?, first_name=?, middle_name=?, last_name=?, phone=?, email=?, links=?,
+        education=?, experience=?, skills=?, languages=? WHERE id=?""",
+        (
+            name,
+            first_name,
+            middle_name,
+            last_name,
+            phone,
+            email,
+            links,
+            education,
+            experience,
+            skills,
+            languages,
+            cand_id,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+if __name__ == "__main__":
+    init_db()
+    app.run(debug=False)
 
 
 ================================================================================
@@ -1328,6 +2162,561 @@ def parse_resume(filepath: str) -> Dict:
 
 
 ================================================================================
+// Path: templates/_flash.html
+================================================================================
+
+{% if get_flashed_messages(with_categories=true) %}
+<style>
+    .flash {
+        border-left: 4px solid;
+    }
+
+    .flash.success {
+        border-left-color: #10b981;
+    }
+
+    .flash.warn {
+        border-left-color: #f59e0b;
+    }
+
+    .flash.info {
+        border-left-color: #3b82f6;
+    }
+
+    .flash.error {
+        border-left-color: #ef4444;
+    }
+</style>
+
+<div style="margin:10px 0">
+    {% for cat, msg in get_flashed_messages(with_categories=true) %}
+    {% set cls = 'success' if cat=='success' else 'warn' if cat=='warn' else 'info' if cat=='info' else 'error' %}
+    <div class="card flash {{ cls }}">{{ msg }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+================================================================================
+// Path: templates/_theme.html
+================================================================================
+
+<style>
+    :root {
+        --bg: #0a0f1d;
+        --bg-soft: #0b1224;
+        --surface: #0f172a;
+        --surface-2: #111b31;
+        --border: #1e293b;
+        --text: #e5e7eb;
+        --muted: #94a3b8;
+        --primary: #3b82f6;
+        /* blue */
+        --primary-2: #60a5fa;
+        --green: #10b981;
+        --amber: #f59e0b;
+        --red: #ef4444;
+        --ring: rgba(59, 130, 246, .45);
+        --shadow: 0 10px 30px rgba(0, 0, 0, .35);
+    }
+
+    * {
+        box-sizing: border-box
+    }
+
+    html,
+    body {
+        height: 100%
+    }
+
+    body {
+        margin: 0;
+        background:
+            radial-gradient(1200px 600px at 20% -10%, rgba(59, 130, 246, .12), transparent 60%),
+            radial-gradient(1000px 500px at 120% 10%, rgba(16, 185, 129, .10), transparent 60%),
+            var(--bg);
+        color: var(--text);
+        font: 15px/1.5 Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+
+    /* Header + Nav */
+    header {
+        padding: 22px 0;
+        background:
+            linear-gradient(180deg, rgba(16, 24, 40, .6), rgba(16, 24, 40, 0)),
+            linear-gradient(90deg, rgba(59, 130, 246, .18), rgba(59, 130, 246, 0) 40%, rgba(16, 185, 129, .18));
+        border-bottom: 1px solid var(--border);
+        backdrop-filter: saturate(130%) blur(6px);
+    }
+
+    header .container {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 0 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between
+    }
+
+    header h1 {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: .2px
+    }
+
+    nav .btn {
+        margin-right: 8px
+    }
+
+    /* Layout */
+    main {
+        max-width: 1100px;
+        margin: 24px auto;
+        padding: 0 16px
+    }
+
+    /* Card */
+    .card {
+        background: linear-gradient(180deg, var(--surface), var(--surface-2));
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 18px;
+        margin: 16px 0;
+        box-shadow: var(--shadow);
+        transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+    }
+
+    .card:hover {
+        transform: translateY(-1px);
+        border-color: #2a3a55
+    }
+
+    /* Upload bar */
+    .upload {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 16px;
+    }
+
+    .upload input[type=file] {
+        flex: 1;
+        color: var(--muted)
+    }
+
+    .upload button {
+        min-width: 160px
+    }
+
+    /* Forms */
+    label {
+        display: block;
+        font-size: 12px;
+        color: var(--muted);
+        margin: 0 0 6px 2px
+    }
+
+    input,
+    textarea {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #0b1120;
+        color: var(--text);
+        outline: none;
+        transition: border-color .15s ease, box-shadow .15s ease, background .15s;
+    }
+
+    input:focus,
+    textarea:focus {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 4px var(--ring);
+        background: #0c1426;
+    }
+
+    textarea {
+        min-height: 96px;
+        resize: vertical
+    }
+
+    /* Buttons */
+    .btn {
+        --btn-bg: #0b1120;
+        --btn-bd: var(--border);
+        --btn-fg: var(--text);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 9px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--btn-bd);
+        background: var(--btn-bg);
+        color: var(--btn-fg);
+        cursor: pointer;
+        text-decoration: none;
+        transition: transform .12s ease, background .15s, border-color .15s, box-shadow .15s;
+    }
+
+    .btn:hover {
+        transform: translateY(-1px);
+        border-color: #2b3b57
+    }
+
+    .btn:active {
+        transform: translateY(0)
+    }
+
+    .btn.primary {
+        --btn-bg: linear-gradient(180deg, var(--primary-2), var(--primary));
+        --btn-bd: transparent;
+        --btn-fg: #fff;
+        box-shadow: 0 6px 18px rgba(59, 130, 246, .25);
+    }
+
+    .btn.destructive {
+        --btn-bg: #1b0e12;
+        --btn-bd: #402227;
+        --btn-fg: #fecaca;
+    }
+
+    .btn.ghost {
+        --btn-bg: transparent;
+        --btn-bd: var(--border);
+        --btn-fg: var(--text);
+    }
+
+    /* Badges / Chips */
+    .badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: #16253f;
+        color: #b6d4ff;
+        border: 1px solid var(--border);
+        font-size: 12px
+    }
+
+    /* Grid helpers already in your HTML – keep them */
+    .grid {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 12px
+    }
+
+    .col-12 {
+        grid-column: span 12
+    }
+
+    .col-6 {
+        grid-column: span 6
+    }
+
+    .col-4 {
+        grid-column: span 4
+    }
+
+    .col-3 {
+        grid-column: span 3
+    }
+
+    /* Tables (admin) */
+    table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden
+    }
+
+    thead th {
+        font-weight: 600;
+        font-size: 12px;
+        color: var(--muted);
+        background: #0c1426
+    }
+
+    th,
+    td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border)
+    }
+
+    tbody tr:nth-child(odd) {
+        background: #0b1224
+    }
+
+    tbody tr:hover {
+        background: #0f1a33
+    }
+
+    td .btn {
+        padding: 6px 10px
+    }
+
+    /* Flash banners (uses your existing partial) */
+    .flash {
+        border-left: 4px solid;
+        background: #0d1428;
+        padding: 10px 14px;
+        border-radius: 10px;
+        margin: 8px 0
+    }
+
+    .flash.success {
+        border-left-color: var(--green);
+        background: rgba(16, 185, 129, .12)
+    }
+
+    .flash.warn {
+        border-left-color: var(--amber);
+        background: rgba(245, 158, 11, .12)
+    }
+
+    .flash.info {
+        border-left-color: var(--primary);
+        background: rgba(59, 130, 246, .12)
+    }
+
+    .flash.error {
+        border-left-color: var(--red);
+        background: rgba(239, 68, 68, .12)
+    }
+
+    /* Section dividers */
+    .section {
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px dashed var(--border)
+    }
+
+    /* Utility */
+    .container {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 0 16px
+    }
+
+    .muted {
+        color: var(--muted)
+    }
+</style>
+
+================================================================================
+// Path: templates/admin_candidates.html
+================================================================================
+
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    {% include "_theme.html" %}
+    <title>All Candidates</title>
+</head>
+
+<body style="font-family:Inter,system-ui;background:#0b0f1a;color:#e5e7eb">
+    <main style="max-width:1100px;margin:40px auto;padding:16px">
+        {% include "_flash.html" %}
+        <div class="card">
+            <h2>All Candidates</h2>
+            <table style="width:100%;border-collapse:collapse">
+                <thead>
+                    <tr>
+                        <th style="text-align:left;padding:8px;border-bottom:1px solid #1f2937">ID</th>
+                        <th style="text-align:left;padding:8px;border-bottom:1px solid #1f2937">Name</th>
+                        <th style="text-align:left;padding:8px;border-bottom:1px solid #1f2937">Email</th>
+                        <th style="text-align:left;padding:8px;border-bottom:1px solid #1f2937">Phone</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in rows %}
+                    <tr>
+                        <td style="padding:8px;border-bottom:1px solid #1f2937">{{ r[0] }}</td>
+                        <td style="padding:8px;border-bottom:1px solid #1f2937">{{ r[1] }}</td>
+                        <td style="padding:8px;border-bottom:1px solid #1f2937">{{ r[2] }}</td>
+                        <td style="padding:8px;border-bottom:1px solid #1f2937">{{ r[3] }}</td>
+                        <td style="padding:8px;border-bottom:1px solid #1f2937">
+                            <form method="post" action="{{ url_for('admin_delete_candidate', cand_id=r[0]) }}"
+                                onsubmit="return confirm('Delete candidate #{{r[0]}}?')">
+                                <button class="btn" style="border-color:#ef4444">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div style="margin-top:12px">
+                <a class="btn" href="{{ url_for('index') }}">Back to app</a>
+            </div>
+        </div>
+    </main>
+</body>
+
+</html>
+
+================================================================================
+// Path: templates/admin_home.html
+================================================================================
+
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Admin</title>
+</head>
+
+<body style="font-family:Inter,system-ui;background:#0b0f1a;color:#e5e7eb">
+    <main style="max-width:900px;margin:40px auto;padding:16px">
+        {% include "_flash.html" %}
+        <div class="card">
+            <h2>Admin</h2>
+            <p>Welcome, {{ user.username }}.</p>
+            <div style="display:flex;gap:10px">
+                <a class="btn" href="{{ url_for('admin_candidates') }}">See all candidates</a>
+                <a class="btn" href="{{ url_for('index') }}">Back to app</a>
+            </div>
+        </div>
+    </main>
+</body>
+
+</html>
+
+================================================================================
+// Path: templates/auth_login.html
+================================================================================
+
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    {% include "_theme.html" %}
+    <title>Login</title>
+</head>
+
+<body style="font-family:Inter,system-ui;background:#0b0f1a;color:#e5e7eb">
+    <main style="max-width:420px;margin:40px auto;padding:16px">
+        {% include "_flash.html" %}
+        <div class="card">
+            <h2>Log in</h2>
+            <form method="post" action="{{ url_for('login', next=next) }}">
+                <label>Username</label><input name="username" required>
+                <label>Password</label><input type="password" name="password" required>
+                <div style="margin-top:12px;display:flex;gap:8px">
+                    <button class="btn primary">Log in</button>
+                    <a class="btn" href="{{ url_for('signup') }}">Create account</a>
+                    <a class="btn" href="{{ url_for('reset_request') }}">Reset password</a>
+                </div>
+            </form>
+        </div>
+    </main>
+</body>
+
+</html>
+
+================================================================================
+// Path: templates/auth_reset_request.html
+================================================================================
+
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    {% include "_theme.html" %}
+    <title>Reset password</title>
+</head>
+
+<body style="font-family:Inter,system-ui;background:#0b0f1a;color:#e5e7eb">
+    <main style="max-width:420px;margin:40px auto;padding:16px">
+        {% include "_flash.html" %}
+        <div class="card">
+            <h2>Password reset</h2>
+            <p class="muted">Enter your username. A reset token will be generated (demo flow).</p>
+            <form method="post">
+                <label>Username</label><input name="username" required>
+                <div style="margin-top:12px;display:flex;gap:8px">
+                    <button class="btn primary">Generate token</button>
+                    <a class="btn" href="{{ url_for('login') }}">Back to login</a>
+                </div>
+            </form>
+        </div>
+    </main>
+</body>
+
+</html>
+
+================================================================================
+// Path: templates/auth_reset_set.html
+================================================================================
+
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    {% include "_theme.html" %}
+    <title>Set new password</title>
+</head>
+
+<body style="font-family:Inter,system-ui;background:#0b0f1a;color:#e5e7eb">
+    <main style="max-width:420px;margin:40px auto;padding:16px">
+        {% include "_flash.html" %}
+        <div class="card">
+            <h2>Choose a new password</h2>
+            <form method="post">
+                <label>New password</label><input type="password" name="password" required>
+                <div style="margin-top:12px;display:flex;gap:8px">
+                    <button class="btn primary">Update</button>
+                    <a class="btn" href="{{ url_for('login') }}">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </main>
+</body>
+
+</html>
+
+================================================================================
+// Path: templates/auth_signup.html
+================================================================================
+
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    {% include "_theme.html" %}
+    <title>Sign up</title>
+</head>
+
+<body style="font-family:Inter,system-ui;background:#0b0f1a;color:#e5e7eb">
+    <main style="max-width:420px;margin:40px auto;padding:16px">
+        {% include "_flash.html" %}
+        <div class="card">
+            <h2>Create account</h2>
+            <form method="post">
+                <label>Username</label><input name="username" required>
+                <label>Password</label><input type="password" name="password" required>
+                <div style="margin-top:12px;display:flex;gap:8px">
+                    <button class="btn primary">Create</button>
+                    <a class="btn" href="{{ url_for('login') }}">Back to login</a>
+                </div>
+            </form>
+        </div>
+    </main>
+</body>
+
+</html>
+
+================================================================================
 // Path: templates/index.html
 ================================================================================
 
@@ -1495,13 +2884,29 @@ def parse_resume(filepath: str) -> Dict:
       color: var(--muted);
     }
   </style>
+  {% include "_theme.html" %}
 </head>
 
 <body>
   <header>
-    <h1>ATS Scanner — Structured Resume Parser</h1>
+    <div class="container">
+      <h1>ATS Scanner — Structured Resume Parser</h1>
+    </div>
   </header>
   <main>
+    <nav class="card" style="display:flex; gap:12px; align-items:center; justify-content:space-between;">
+      <div>
+        <a class="btn" href="/">Home</a>
+        <a class="btn" href="/admin">Admin</a>
+        <a class="btn" href="/admin/candidates">All CVs</a>
+      </div>
+      <div>
+        <a class="btn" href="/logout">Log out</a>
+      </div>
+    </nav>
+
+    {% include "_flash.html" %}
+
     <form class="upload" method="POST" enctype="multipart/form-data">
       <input type="file" name="resume" accept=".pdf" required>
       <button type="submit">Upload & Parse</button>
@@ -1750,4 +3155,4 @@ def parse_resume(filepath: str) -> Dict:
 </html>
 
 
-// Summary: wrote 7 files, skipped 34353 files.
+// Summary: wrote 15 files, skipped 34364 files.

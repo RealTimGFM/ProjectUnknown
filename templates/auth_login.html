@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    {% include "_theme.html" %}
+    <title>Login</title>
+</head>
+
+<body style="font-family:Inter,system-ui;background:#0b0f1a;color:#e5e7eb">
+    <main style="max-width:420px;margin:40px auto;padding:16px">
+        {% include "_flash.html" %}
+        <div class="card">
+            <h2>Log in</h2>
+            <form method="post" action="{{ url_for('login', next=next) }}">
+                <label>Username</label><input name="username" required>
+                <label>Password</label><input type="password" name="password" required>
+                <div style="margin-top:12px;display:flex;gap:8px">
+                    <button class="btn primary">Log in</button>
+                    <a class="btn" href="{{ url_for('signup') }}">Create account</a>
+                    <a class="btn" href="{{ url_for('reset_request') }}">Reset password</a>
+                </div>
+            </form>
+        </div>
+    </main>
+</body>
+
+</html>
