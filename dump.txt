@@ -2,7 +2,7 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-09-29T02:02:27Z
+Generated: 2025-10-13T02:47:20Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -14,7 +14,6 @@ ProjectUnknown/
 ├── templates/
 │   └── index.html
 ├── uploads/
-│   └── 9829f9ce7a8141779120188b999d7722_QuyVuLuong_CV.pdf
 ├── .gitattributes
 ├── backend.py
 ├── dump.txt
@@ -23,7 +22,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 2  Files: 9
+Directories: 2  Files: 8
 
 ================================================================================
 FILE CONTENTS
@@ -52,7 +51,7 @@ A minimal ATS-style web app:
 - Safe parser (guards against missing sections / malformed bullets).
 
 ---
-
+```powershell
 ## Project Structure
 ProjectUnknown/
 ├─ backend.py # Flask app + DB CRUD
@@ -64,6 +63,7 @@ ProjectUnknown/
 ├─ requirements.txt
 └─ README.md
 ## Quickstart
+```
 
 > Tested on **Python 3.13**. Works on 3.10+.
 
@@ -81,6 +81,7 @@ del database.db         # PowerShell
 # or
 rm database.db          # bash/zsh
 # start the app again so it recreates the table
+
 
 ================================================================================
 // Path: backend.py
@@ -1749,4 +1750,4 @@ def parse_resume(filepath: str) -> Dict:
 </html>
 
 
-// Summary: wrote 7 files, skipped 29908 files.
+// Summary: wrote 7 files, skipped 34353 files.
