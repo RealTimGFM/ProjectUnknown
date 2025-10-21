@@ -2,7 +2,7 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-10-13T20:08:21Z
+Generated: 2025-10-21T02:39:01Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -11,6 +11,15 @@ PROJECT TREE
 ================================================================================
 
 ProjectUnknown/
+├── ats_parser/
+│   ├── __init__.py
+│   ├── ingest.py
+│   ├── llm.py
+│   ├── models.py
+│   ├── parser.py
+│   ├── reconcile.py
+│   ├── rules.py
+│   └── sections.py
 ├── templates/
 │   ├── _flash.html
 │   ├── _theme.html
@@ -22,9 +31,10 @@ ProjectUnknown/
 │   ├── auth_signup.html
 │   └── index.html
 ├── uploads/
-│   ├── 2baa2dd8828a421989f7d6a423ba7f44_QuyVuLuong_CV.pdf
-│   └── fea835ae0fc04400ad09025ffb10465e_RutayisireLucienResume_3.pdf
+│   ├── 83027bdf40824802abb5d3b488c3662e_OlivierLachanceCV_English.pdf
+│   └── a70599ab4bcd458bb485b39e650fd134_QuyVuLuong_CV.pdf
 ├── .gitattributes
+├── .gitignore
 ├── backend.py
 ├── database.db
 ├── dump.txt
@@ -33,7 +43,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 2  Files: 19
+Directories: 3  Files: 28
 
 ================================================================================
 FILE CONTENTS
@@ -178,7 +188,8 @@ def admin_required(fn):
 
 @app.before_request
 def enforce_idle_timeout():
-    now = datetime.utcnow().timestamp()
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).timestamp()
     last = session.get("last_seen")
     if session.get("user_id"):
         if last and (now - last) > (IDLE_TIMEOUT_MIN * 60):
@@ -220,7 +231,8 @@ def signup():
         session.clear()
         session.permanent = True
         session["user_id"] = uid
-        session["last_seen"] = datetime.utcnow().timestamp()
+        from datetime import datetime, timezone
+        session["last_seen"] = datetime.now(timezone.utc).timestamp()
         flash("Account created. Welcome!", "success")
         return redirect(url_for("index"))
     return render_template("auth_signup.html")
@@ -456,7 +468,7 @@ def index():
                 education, experience, skills, languages, raw_text)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                parsed["name"],
+                parsed.get("name",""),
                 parsed.get("first_name", ""),
                 parsed.get("middle_name", ""),
                 parsed.get("last_name", ""),
@@ -542,7 +554,7 @@ if __name__ == "__main__":
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-10-13T20:08:21Z
+Generated: 2025-10-21T02:39:01Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -551,6 +563,15 @@ PROJECT TREE
 ================================================================================
 
 ProjectUnknown/
+├── ats_parser/
+│   ├── __init__.py
+│   ├── ingest.py
+│   ├── llm.py
+│   ├── models.py
+│   ├── parser.py
+│   ├── reconcile.py
+│   ├── rules.py
+│   └── sections.py
 ├── templates/
 │   ├── _flash.html
 │   ├── _theme.html
@@ -562,9 +583,10 @@ ProjectUnknown/
 │   ├── auth_signup.html
 │   └── index.html
 ├── uploads/
-│   ├── 2baa2dd8828a421989f7d6a423ba7f44_QuyVuLuong_CV.pdf
-│   └── fea835ae0fc04400ad09025ffb10465e_RutayisireLucienResume_3.pdf
+│   ├── 83027bdf40824802abb5d3b488c3662e_OlivierLachanceCV_English.pdf
+│   └── a70599ab4bcd458bb485b39e650fd134_QuyVuLuong_CV.pdf
 ├── .gitattributes
+├── .gitignore
 ├── backend.py
 ├── database.db
 ├── dump.txt
@@ -573,7 +595,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 2  Files: 19
+Directories: 3  Files: 28
 
 ================================================================================
 FILE CONTENTS
@@ -718,7 +740,8 @@ def admin_required(fn):
 
 @app.before_request
 def enforce_idle_timeout():
-    now = datetime.utcnow().timestamp()
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).timestamp()
     last = session.get("last_seen")
     if session.get("user_id"):
         if last and (now - last) > (IDLE_TIMEOUT_MIN * 60):
@@ -760,7 +783,8 @@ def signup():
         session.clear()
         session.permanent = True
         session["user_id"] = uid
-        session["last_seen"] = datetime.utcnow().timestamp()
+        from datetime import datetime, timezone
+        session["last_seen"] = datetime.now(timezone.utc).timestamp()
         flash("Account created. Welcome!", "success")
         return redirect(url_for("index"))
     return render_template("auth_signup.html")
@@ -996,7 +1020,7 @@ def index():
                 education, experience, skills, languages, raw_text)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                parsed["name"],
+                parsed.get("name",""),
                 parsed.get("first_name", ""),
                 parsed.get("middle_name", ""),
                 parsed.get("last_name", ""),
@@ -1372,757 +1396,298 @@ filetype>=1.2.0
 # --- Nice-to-have logs ---
 rich>=13.8
 
+# --- NLP ---
+spacy>=3.7
+srsly>=2.4
+typer>=0.12
+
+# optional but useful:
+spacy-lookups-data>=1.0
+
+# --- New/updated deps for ats_parser (hybrid parser) ---
+pydantic>=2.7
+rapidfuzz>=3.9
+langdetect>=1.0.9
+httpx>=0.27
+requests>=2.32
+openai>=1.40        # only needed if USE_LLM=1
+
+dateparser>=1.2
 
 ================================================================================
 // Path: resume_parser.py
 ================================================================================
 
+
 from __future__ import annotations
-import re, io
-from typing import List, Dict, Tuple
-from datetime import datetime
+# Drop-in replacement using ats_parser
+from ats_parser import parse_file, adapt_for_backend
 
-import fitz
+def parse_resume(filepath: str) -> dict:
+    res = parse_file(filepath)
+    return adapt_for_backend(res)
+
+
+================================================================================
+// Path: ats_parser/__init__.py
+================================================================================
+
+
+"""Hybrid resume parser package (rules + optional LLM)."""
+from .parser import parse_file, parse_bytes, adapt_for_backend
+
+
+================================================================================
+// Path: ats_parser/ingest.py
+================================================================================
+
+
+from __future__ import annotations
+import os, re, unicodedata
+from typing import Tuple
+import fitz  # PyMuPDF
 import pdfplumber
-import easyocr
 
-from dateutil import parser as dateparser
-import phonenumbers
-from email_validator import validate_email, EmailNotValidError
+USE_OCR = os.getenv("USE_OCR", "0") == "1"
+OCR_LANGS = (os.getenv("OCR_LANGS", "en").split(","))
 
-# ---------- Regexes & helpers ----------
-MONTHS = r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*"
-YEAR = r"(19|20)\d{2}"
-DATE_RE = re.compile(
-    rf"(?P<start>({MONTHS}\s+{YEAR}|{YEAR}))\s*[-–—]\s*(?P<end>({MONTHS}\s+{YEAR}|{YEAR}|Present|Current))",
-    re.IGNORECASE,
-)
+def _norm_ws(s: str) -> str:
+    if not s:
+        return ""
+    s = s.replace("\ufeff", "")
+    s = "".join(" " if (ch.isspace() or unicodedata.category(ch) == "Zs") else ch for ch in s)
+    return re.sub(r"\s+", " ", s).strip()
 
-EDU_LEVEL_RE = re.compile(
-    r"(High School Diploma|Diploma(?: of College Studies)?(?:\s*DEC)?|Bachelor(?:'s)?|Master(?:'s)?|BSc|MSc|PhD)",
-    re.I,
-)
-EDU_SCHOOL_HINT = re.compile(r"(University|College|School|Institute)", re.I)
-LOCATION_LINE_RE = re.compile(r"[A-Z][a-z]+(?:,?\s+[A-Z][a-z]+)+(?:,\s*[A-Za-z.]+)?")
+def _page_blocks_sorted(page):
+    blocks = page.get_text("blocks") or []
+    blocks.sort(key=lambda b: (round(b[1],1), round(b[0],1)))
+    return blocks
 
-SCHOOL_LOC_SPLIT_RE = re.compile(
-    r"^(?P<school>.*?(?:University|College|School|Institute))\s*[,–—-]\s*(?P<loc>.+)$",
-    re.I,
-)
+def _blocks_to_text(blocks):
+    lines = []
+    for b in blocks:
+        t = (b[4] or "").strip()
+        if t:
+            lines.append(t)
+    return "\n".join(lines)
 
-CONTACT_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-CONTACT_PHONE_RE = re.compile(r"(\+?\d[\d\s().-]{7,}\d)")
-URL_RE = re.compile(r"(https?://[^\s]+|(?:www\.)?(?:github|linkedin)\.com[^\s]*)", re.I)
-LOCATION_HINTS = ["Montreal", "QC", "Canada", "Ho Chi Minh", "Viet", "Vietnam"]
-# --- role & company heuristics for experience titles ---
-ROLE_WORDS = {
-    "intern",
-    "developer",
-    "engineer",
-    "analyst",
-    "manager",
-    "consultant",
-    "architect",
-    "administrator",
-    "specialist",
-    "scientist",
-    "lead",
-    "principal",
-    "director",
-    "founder",
-    "co-founder",
-    "sre",
-    "devops",
-    "tester",
-    "qa",
-    "designer",
-}
-COMPANY_SUFFIX = re.compile(
-    r"\b(inc\.?|corp\.?|llc|ltd\.?|co\.?|company|capital|fund|bank|group|partners?|"
-    r"systems?|labs?|studio|technolog(?:y|ies)|solutions?)\b",
-    re.I,
-)
-TITLE_HINT = re.compile(
-    r"\b(senior|sr\.?|jr\.?|junior|lead|principal|staff|head|director|manager|"
-    r"engineer|developer|analyst|consultant|architect|intern)\b",
-    re.I,
-)
-BULLET_LINE = re.compile(r"^\s*[-*•]\s+")
+_ocr_reader = None
+def _get_ocr():
+    global _ocr_reader
+    if _ocr_reader is None:
+        import easyocr  # lazy
+        _ocr_reader = easyocr.Reader(OCR_LANGS, gpu=False)
+    return _ocr_reader
 
-
-def _looks_like_title(s: str) -> bool:
-    s = _norm(s)
-    if not s or BULLET_LINE.match(s):
-        return False
-    if s.endswith("."):  # full sentence → likely not a title
-        return False
-    if TITLE_HINT.search(s):  # contains role keywords
-        return True
-    # title-case heuristic: many tokens start uppercase but not all caps
-    toks = [t for t in s.split() if t.isalpha()]
-    if not toks:
-        return False
-    caps = sum(1 for t in toks if t[0].isupper() and not t.isupper())
-    return caps / len(toks) >= 0.6 and len(toks) <= 7
-
-
-def _looks_like_company(s: str) -> bool:
-    s = _norm(s)
-    if not s or BULLET_LINE.match(s):
-        return False
-    if s.lower().startswith(("http://", "https://", "www.")):
-        return False
-    if COMPANY_SUFFIX.search(s):
-        return True
-    # many company lines are all Title Case but short
-    toks = [t for t in s.split() if t.isalpha()]
-    caps = sum(1 for t in toks if t[0].isupper())
-    return caps >= 2 and len(toks) <= 8
-
-
-def _guess_title_company_from_buffer(buf: list[str]) -> tuple[str, str]:
-    """
-    Look back over the last few non-empty lines and pick a company & title.
-    Prefer: company line with suffixes (Inc., Corp.) and the line just above it as title.
-    Fallback: any title-like line, then any company-like line.
-    """
-    cand_title, cand_company = "", ""
-    window = [_norm(x) for x in buf if _norm(x)][-6:]  # last ~6 non-empty lines
-    # pass 1: company first then title just above
-    for i in range(len(window) - 1, -1, -1):
-        if _looks_like_company(window[i]):
-            cand_company = window[i]
-            # title likely the nearest line above
-            for j in range(i - 1, -1, -1):
-                if _looks_like_title(window[j]):
-                    cand_title = window[j]
-                    break
-            break
-    # pass 2: if title still empty, find any title-like line
-    if not cand_title:
-        for i in range(len(window) - 1, -1, -1):
-            if _looks_like_title(window[i]):
-                cand_title = window[i]
-                break
-    # pass 3: if company still empty, take any company-like line
-    if not cand_company:
-        for i in range(len(window) - 1, -1, -1):
-            if _looks_like_company(window[i]):
-                cand_company = window[i]
-                break
-    return cand_title, cand_company
-
-
-# --- add near the top (after imports/regex) ---
-# Header labels that appear in the SKILLS block; we'll strip these off lines
-CATEGORY_PREFIX = re.compile(
-    r"""^\s*(
-        languages?|
-        frameworks(?:\s*/\s*|\s*&\s*)?libraries|
-        frameworks|libraries|
-        data\s*/?\s*ai|data/ai|data|ai|
-        databases?|
-        infra(?:structure)?(?:\s*&\s*hosting)?|infra\s*&\s*hosting|hosting|
-        tooling|tools|
-        technology\s*stack|tech\s*stack|stack
-    )\s*:\s*""",
-    re.I | re.X,
-)
-
-# Multi-word phrases to capture as a single skill BEFORE generic tokenizing
-MULTI_PHRASES = [
-    "semantic search",
-    "cosine similarity",
-    "visual studio 2022",
-    "vs code",
-    "tailwind css",
-    "sql server",
-    "azure vm",
-    "jakarta ee",
-    "better-sqlite3",
-]
-
-# Canonical casing for common skills/tools
-CANON = {
-    "c#": "C#",
-    "c++": "C++",
-    ".net": ".NET",
-    "asp.net": "ASP.NET",
-    "javascript": "JavaScript",
-    "typescript": "TypeScript",
-    "numpy": "NumPy",
-    "sbert": "SBERT",
-    "t-sql": "T-SQL",
-    "sql server": "SQL Server",
-    "ssms": "SSMS",
-    "mysql": "MySQL",
-    "phpmyadmin": "phpMyAdmin",
-    "sqlite": "SQLite",
-    "h2": "H2",
-    "azure vm": "Azure VM",
-    "iaas": "IaaS",
-    "iis": "IIS",
-    "tomcat": "Tomcat",
-    "git": "Git",
-    "github": "GitHub",
-    "visual studio 2022": "Visual Studio 2022",
-    "vs code": "VS Code",
-    "tailwind css": "Tailwind CSS",
-    "jakarta ee": "Jakarta EE",
-    "flask": "Flask",
-    "pandas": "pandas",
-    "scikit-learn": "scikit-learn",
-}
-
-# Tokens to ignore if they accidentally slip through (noise/fillers)
-STOPWORDS = re.compile(
-    r"^(incl|including|and|with|using|basic|intermediate|advanced|expert|proficient|the|a|an|data|ai)$",
-    re.I,
-)
-
-SKILL_PHRASES = {
-    # technical (add freely)
-    "python",
-    "java",
-    "javascript",
-    "typescript",
-    "c",
-    "c++",
-    "c#",
-    ".net",
-    "node.js",
-    "react",
-    "vue",
-    "angular",
-    "html",
-    "css",
-    "sass",
-    "sql",
-    "postgresql",
-    "mysql",
-    "sqlite",
-    "mongodb",
-    "nosql",
-    "redis",
-    "aws",
-    "azure",
-    "gcp",
-    "docker",
-    "kubernetes",
-    "linux",
-    "git",
-    "github",
-    "gitlab",
-    "ci/cd",
-    "terraform",
-    "ansible",
-    "spark",
-    "hadoop",
-    "pandas",
-    "numpy",
-    "scikit-learn",
-    "opencv",
-    "pytorch",
-    "tensorflow",
-    "fastapi",
-    "flask",
-    "django",
-    "rest",
-    "grpc",
-    "graphql",
-    "rabbitmq",
-    "kafka",
-    "elasticsearch",
-    # soft/general
-    "agile",
-    "scrum",
-    "kanban",
-    "communication",
-    "leadership",
-    "mentoring",
-    "problem solving",
-    "teamwork",
-}
-TECH_TOKEN = re.compile(
-    r"""
-    (?:                             # known multi-char tokens first (verbose mode)
-        C\+\+ | C\# | \.NET | Node\.js | React | Vue | Angular | CI/CD | SQL | NoSQL
-    )
-    |
-    (?:[A-Za-z][\w.+#-]*)           # generic tech-ish token (allows ., +, #, -)
-    """,
-    re.I | re.X,
-)
-
-
-def _extract_skills(sections: dict, experience: list) -> str:
-    """
-    RAW mode: return EVERYTHING inside the SKILLS section exactly as text.
-    We only trim leading/trailing whitespace per line and join lines with spaces.
-    No splitting, no aliasing, no dedupe, no tokenization.
-    """
-    lines = sections.get("SKILLS", []) or []
-    # keep original order; preserve punctuation/colons/parentheses/etc.
-    cleaned = [(ln or "").strip() for ln in lines if (ln or "").strip()]
-    return " ".join(cleaned)  # single-line for the UI input
-
-
-def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "")).strip()
-
-
-def _duration_months_inclusive(start_dt: datetime, end_dt: datetime) -> int:
-    return max(
-        0, (end_dt.year - start_dt.year) * 12 + (end_dt.month - start_dt.month) + 1
-    )
-
-
-# ---------- PDF text extraction with OCR fallback ----------
-_reader = None  # lazy EasyOCR reader (global to reuse weights)
-
-
-def _get_ocr_reader():
-    global _reader
-    if _reader is None:
-        # English by default; add more codes like ['en','fr'] if needed
-        _reader = easyocr.Reader(["en"], gpu=False)
-    return _reader
-
-
-def _read_pdf_text(path: str) -> str:
-    """
-    1) Try PyMuPDF text. If a page has too little text, render page -> image and OCR with EasyOCR.
-    2) Optionally blend pdfplumber text as a hint if both are sparse.
-    """
+def read_pdf_text(path: str) -> Tuple[str, int]:
+    """Return (text, ocr_pages_used). Uses blocks; falls back to text/ocr/pdfplumber."""
     doc = fitz.open(path)
-    parts: List[str] = []
-    sparse = 0
-    for page in doc:
-        t = page.get_text("text") or ""
-        if len(t.strip()) < 50:
-            sparse += 1
-            # OCR fallback
-            pix = page.get_pixmap(dpi=300, alpha=False)
-            img_bytes = pix.tobytes("png")
-            reader = _get_ocr_reader()
-            result = reader.readtext(img_bytes, detail=0, paragraph=True)
-            t = "\n".join(result)
-        parts.append(t)
+    assembled, ocr_count = [], 0
+    for i, page in enumerate(doc):
+        raw = _blocks_to_text(_page_blocks_sorted(page)) or (page.get_text("text") or "")
+        if len(_norm_ws(raw)) < 120 and USE_OCR:
+            # high-res pix + OCR
+            mat = fitz.Matrix(300/72, 300/72).preRotate((page.rotation or 0)%360)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            img = pix.tobytes("png")
+            reader = _get_ocr()
+            lines = reader.readtext(img, detail=0, paragraph=True)
+            raw = "\n".join(l.strip() for l in lines if l and l.strip())
+            ocr_count += 1
+        assembled.append(raw)
     doc.close()
+    text = "\n".join(assembled).strip()
 
-    text = "\n".join(parts).strip()
-
-    # As an extra hint, try pdfplumber if we still got almost nothing
-    if len(text) < 80:
+    # rescue with pdfplumber if still sparse
+    if len(_norm_ws(text)) < 120:
         try:
             with pdfplumber.open(path) as pdf:
-                more = "\n".join((p.extract_text() or "") for p in pdf.pages)
-            if len(more.strip()) > len(text):
-                text = more
+                text2 = "\n".join((p.extract_text() or "") for p in pdf.pages)
+            if len(_norm_ws(text2)) > len(_norm_ws(text)):
+                text = text2
         except Exception:
             pass
 
-    return (text or "") + "\n"
+    return (text or "") + "\n", ocr_count
 
 
-# ---------- Section splitting ----------
-def _split_sections(text: str) -> dict:
+================================================================================
+// Path: ats_parser/llm.py
+================================================================================
+
+from typing import List
+import os, json, requests
+from .models import ExperienceItem, DateSpan
+
+USE_LLM = os.getenv("USE_LLM", "0") == "1"
+
+
+def extract_experience_llm(text: str) -> List[ExperienceItem]:
     """
-    Split resume text into sections using tolerant regex headers.
-    If we're already inside SKILLS and we see subcategory lines like
-    'Languages: ...' or 'Frameworks/Libraries: ...', keep them as SKILLS content
-    instead of starting a new section.
+    LLM extractor for EXPERIENCE.
+    - Requires USE_LLM=1 and OPENAI_API_KEY.
+    - Enforces a JSON *array* via json_schema.
     """
-    sections, current = {}, None
+    if not USE_LLM or not (text or "").strip():
+        return []
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return []
 
-    header_patterns = {
-        "SUMMARY": re.compile(
-            r"^(summary|professional summary|profile)\b[:\-–—]?", re.I
-        ),
-        "EXPERIENCE": re.compile(
-            r"^(experience|work experience|employment|professional experience)\b[:\-–—]?",
-            re.I,
-        ),
-        "EDUCATION": re.compile(r"^(education|academic background)\b[:\-–—]?", re.I),
-        # treat many synonyms as Skills headers (top-level)
-        "SKILLS": re.compile(
-            r"^(skills|technical skills|tech skills|skills & interests|skills and interests|"
-            r"core competencies|competencies|technical proficienc(?:y|ies)|proficienc(?:y|ies)|"
-            r"technolog(?:y|ies)|tools|tooling|tech stack|technology stack|stack|"
-            r"programming (?:skills|languages)|frameworks(?:\s*/\s*|\s*&\s*)?libraries|frameworks|libraries|strengths)"
-            r"\b[:\-–—]?",
-            re.I,
-        ),
-        # real separate LANGUAGES section (e.g., human languages)
-        "LANGUAGES": re.compile(r"^languages\b[:\-–—]?", re.I),
-        # kept for completeness
-        "PROJECTS": re.compile(
-            r"^(projects|personal projects|notable projects)\b[:\-–—]?", re.I
-        ),
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    schema = {
+        "name": "experience_array",
+        "schema": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "company": {"type": "string"},
+                    "location": {"type": "string"},
+                    "dates": {
+                        "type": "object",
+                        "properties": {
+                            "start": {"type": ["string", "null"]},
+                            "end": {"type": ["string", "null"]},
+                            "months": {"type": ["integer", "null"]},
+                        },
+                    },
+                    "bullets": {"type": "array", "items": {"type": "string"}},
+                    "technologies": {"type": "array", "items": {"type": "string"}},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["title", "company", "dates", "bullets"],
+            },
+        },
+        "strict": True,
     }
 
-    def has_inline_content_after_colon(line: str) -> bool:
-        i = line.find(":")
-        return i != -1 and line[i + 1 :].strip() != ""
+    prompt = f"""Extract the candidate's work EXPERIENCE from the text.
+Return a JSON array. Dates must be YYYY-MM or null. If end date is current, set end to "Present".
+Text:
+{text}
+"""
 
-    for raw in text.splitlines():
-        line = _norm(raw)
-        if not line:
-            continue
-
-        matched_header = None
-        for key, pat in header_patterns.items():
-            if pat.match(line):
-                matched_header = key
-                break
-
-        if matched_header:
-            # --- IMPORTANT RULE ---
-            # If we're already in SKILLS and this "header" has inline content (e.g., "Languages: C#, Java"),
-            # treat it as a SKILLS content row (subcategory) instead of starting a new section.
-            if current == "SKILLS" and has_inline_content_after_colon(line):
-                sections.setdefault("SKILLS", []).append(line)
-                continue
-
-            # If this is the very first SKILLS-like header *and* it carries inline content on the same line,
-            # start SKILLS and keep that line as content too.
-            if matched_header == "SKILLS" and has_inline_content_after_colon(line):
-                current = "SKILLS"
-                sections.setdefault("SKILLS", [])
-                sections["SKILLS"].append(line)
-                continue
-
-            # Otherwise, switch sections normally.
-            current = matched_header
-            sections.setdefault(current, [])
-            continue
-
-        if current:
-            sections[current].append(line)
-
-    return sections
-
-
-def _parse_date_range(s: str) -> Tuple[str | None, str | None, int | None]:
-    m = DATE_RE.search(s or "")
-    if not m:
-        return None, None, None
-    start_raw, end_raw = m.group("start"), m.group("end")
     try:
-        start_dt = dateparser.parse(start_raw, fuzzy=True)
-    except Exception:
-        start_dt = None
-    if end_raw and re.search(r"present|current", end_raw or "", re.I):
-        end_dt = datetime.utcnow()
-    else:
-        try:
-            end_dt = dateparser.parse(end_raw, fuzzy=True) if end_raw else None
-        except Exception:
-            end_dt = None
-    duration = None
-    if start_dt and end_dt:
-        duration = _duration_months_inclusive(start_dt, end_dt)
-    return start_raw, end_raw, duration
-
-
-def _extract_contacts(text: str) -> Dict[str, str | list]:
-    # phone
-    phone = ""
-    m = CONTACT_PHONE_RE.search(text or "")
-    if m:
-        try:
-            pn = phonenumbers.parse(m.group(0), "CA")
-            phone = (
-                phonenumbers.format_number(
-                    pn, phonenumbers.PhoneNumberFormat.INTERNATIONAL
-                )
-                if phonenumbers.is_valid_number(pn)
-                else _norm(m.group(0))
-            )
-        except Exception:
-            phone = _norm(m.group(0))
-    # email
-    email = ""
-    m = CONTACT_EMAIL_RE.search(text or "")
-    if m:
-        try:
-            email = validate_email(m.group(0)).normalized
-        except EmailNotValidError:
-            email = _norm(m.group(0))
-    # urls
-    urls = [_norm(u) for u in URL_RE.findall(text or "")]
-    # rough location line
-    loc = ""
-    for line in (text or "").splitlines():
-        if any(h in line for h in LOCATION_HINTS) or re.search(
-            r"[A-Z][a-z]+(?:,?\s+[A-Z][a-z]+)+(?:,\s*[A-Za-z]+)?", line
-        ):
-            loc = _norm(line)
-            break
-    return {"phone": phone, "urls": urls, "email": email, "location": loc}
-
-
-def _guess_name(lines: List[str]) -> str:
-    # choose the first plausible name-like line (titlecased tokens, not contact)
-    for raw in lines[:20]:
-        s = _norm(raw)
-        if not s:
-            continue
-        if CONTACT_EMAIL_RE.search(s) or CONTACT_PHONE_RE.search(s) or URL_RE.search(s):
-            continue
-        tokens = [t for t in s.split() if re.match(r"^[A-Z][a-zA-Z-]+$", t)]
-        if len(tokens) >= 2:
-            return s
-    return next((_norm(l) for l in lines if _norm(l)), "Unknown")
-
-
-# ---------- Section parsers ----------
-def _parse_experience(lines: List[str]) -> List[Dict]:
-    items: List[Dict] = []
-    cur: Dict | None = None
-    prebuf: List[str] = []  # recent non-empty lines before the date line
-    company_hint = COMPANY_SUFFIX  # reuse pattern
-
-    def start_new_job(date_line: str):
-        nonlocal cur
-        start, end, dur = _parse_date_range(date_line)
-        head = DATE_RE.split(date_line)[0].strip(" -–—|")
-        parts = [p.strip() for p in re.split(r"[|•\-–—]", head) if p.strip()]
-        # Try to get title/company from the 'head' (left of dates) if present
-        head_title = parts[0] if parts else ""
-        head_company = parts[1] if len(parts) >= 2 else ""
-        # If head is empty (common in two-column resumes), backscan prebuf
-        buf_title, buf_company = _guess_title_company_from_buffer(prebuf)
-
-        title = _norm(head_title or buf_title)
-        company = _norm(head_company or buf_company)
-
-        cur = {
-            "position": title,
-            "company_name": company,
-            "location": "",
-            "start_date": start,
-            "end_date": end,
-            "duration_months": dur,
-            "description": "",
-            "skills_used_tech": [],
-            "skills_used_soft": [],
-        }
-
-    for ln in lines:
-        line = _norm(ln)
-        if not line:
-            continue
-
-        # New job boundary: a line with a date range
-        if DATE_RE.search(line):
-            if cur:
-                # close previous job
-                items.append(cur)
-            start_new_job(line)
-            prebuf.clear()
-            continue
-
-        # Accumulate pre-buffer for title/company discovery before date line
-        if not cur:
-            prebuf.append(line)
-            # keep last ~6 meaningful lines
-            if len(prebuf) > 8:
-                prebuf = prebuf[-8:]
-            continue
-
-        # Within a job block → grow description & fill missing metadata
-        if BULLET_LINE.match(line):
-            clean = BULLET_LINE.sub("", line).strip()
-        else:
-            clean = line
-        cur["description"] = (
-            cur["description"] + ("\n" if cur["description"] else "") + clean
-        ).strip()
-
-        # Fill company/location from body hints if still missing
-        if not cur["company_name"] and company_hint.search(line):
-            cur["company_name"] = line
-        if not cur["location"]:
-            if any(h.lower() in line.lower() for h in LOCATION_HINTS):
-                cur["location"] = line
-
-        # Sometimes a title appears again near the top of bullet block (e.g., "Developer")
-        if not cur["position"] and _looks_like_title(line):
-            cur["position"] = line
-
-    if cur:
-        items.append(cur)
-
-    # Post-fixes
-    for e in items:
-        if not e["company_name"] and re.search(
-            r"Machine Builder Inc\.?", e.get("description", ""), re.I
-        ):
-            e["company_name"] = "Machine Builder Inc."
-        if not e["location"] and re.search(r"Montreal", e.get("description", ""), re.I):
-            e["location"] = "Montreal"
-        if e.get("start_date") and (
-            not e.get("end_date")
-            or re.search(r"present|current", e.get("end_date") or "", re.I)
-        ):
-            # recompute inclusive months to now
-            _, _, e["duration_months"] = _parse_date_range(
-                f"{e['start_date']} - Present"
-            )
-
-    return items
-
-
-def _parse_education(lines: List[str]) -> List[Dict]:
-    """
-    Each education entry starts at a 'level' line (e.g., 'High School Diploma',
-    'Diploma of College Studies DEC – Computer Science', 'Bachelor ...', etc).
-    We then attach up to the next 2 relevant lines (school and/or location).
-    """
-    items: List[Dict] = []
-    i, n = 0, len(lines)
-
-    def parse_block(buf: List[str]) -> Dict:
-        # Join for date parsing, but keep lines to pull school/location reliably
-        text = " | ".join(buf)
-
-        # Dates anywhere in the small block
-        start, end, _ = _parse_date_range(text)
-
-        # Level & Field
-        level = ""
-        field = ""
-        m = EDU_LEVEL_RE.search(buf[0])
-        if m:
-            level = _norm(m.group(1))
-        # DEC fields often after a dash on the same first line
-        m_dec = re.search(r"DEC\s*[–—-]\s*([A-Za-z &/+\-]{2,})", buf[0], re.I)
-        if m_dec:
-            field = _norm(m_dec.group(1))
-        elif re.search(r"(Bachelor|Master|BSc|MSc|PhD)", buf[0], re.I):
-            m_field = re.search(r"(?:in|of)\s+([A-Za-z &/+\-]{2,})", buf[0], re.I)
-            if m_field:
-                field = _norm(m_field.group(1))
-
-        # School & Location
-        school, location = "", ""
-
-        # 1) If the first line is "Level – School", split that
-        parts = [p.strip() for p in re.split(r"[–—-]", buf[0]) if p.strip()]
-        if len(parts) >= 2 and EDU_SCHOOL_HINT.search(parts[-1]):
-            school = _norm(parts[-1])
-
-        # 2) Otherwise, look at following lines for school/location
-        for s in buf[1:]:
-            s_norm = _norm(s)
-            # line like "LaSalle College, Montreal, QC"
-            msl = SCHOOL_LOC_SPLIT_RE.match(s_norm)
-            if msl:
-                school = school or _norm(msl.group("school"))
-                location = _norm(msl.group("loc"))
-                continue
-            # pure school line
-            if EDU_SCHOOL_HINT.search(s_norm):
-                school = school or s_norm
-                continue
-            # pure location line
-            if LOCATION_LINE_RE.search(s_norm):
-                location = location or s_norm
-                continue
-
-        # Canonicals for your examples (optional)
-        if re.search(r"High School Diploma", text, re.I) and re.search(
-            r"Lawrence", text, re.I
-        ):
-            school = "Lawrence S. Ting School"
-        if re.search(r"\bDEC\b", text, re.I) and re.search(r"LaSalle", text, re.I):
-            school = "LaSalle College"
-
-        return {
-            "level": level,
-            "field": field,
-            "school_name": school,
-            "location": location,
-            "start_year": start,
-            "end_year": end,
-        }
-
-    # Walk the EDUCATION lines; a level line starts a new entry
-    while i < n:
-        line = _norm(lines[i])
-        i += 1
-        if not line:
-            continue
-
-        if EDU_LEVEL_RE.search(line):
-            # Start a new entry and attach up to next TWO relevant lines
-            buf = [line]
-            attach = 0
-            while i < n and attach < 2:
-                nxt = _norm(lines[i])
-                # Stop when next 'level' begins or another section header appears
-                if not nxt:
-                    i += 1
-                    continue
-                if EDU_LEVEL_RE.search(nxt):
-                    break
-                if re.match(
-                    r"^(experience|projects|skills|summary|languages)\b", nxt, re.I
-                ):
-                    break
-                buf.append(nxt)
-                attach += 1
-                i += 1
-            items.append(parse_block(buf))
-
-    # Keep only non-empty entries
-    return [
-        e
-        for e in items
-        if any([e["level"], e["school_name"], e["start_year"], e["end_year"]])
-    ]
-
-
-def _parse_projects(lines: List[str]) -> List[Dict]:
-    items, buf = [], []
-
-    def dates_in(s: str) -> str:
-        m = DATE_RE.search(s or "")
-        return m.group(0) if m else ""
-
-    def clean_title(s: str) -> str:
-        s = re.sub(DATE_RE, "", s or "")
-        s = re.sub(r"\b(20\d{2}|19\d{2})\b", "", s)
-        return _norm(s)
-
-    def flush():
-        if not buf:
-            return
-        text = "\n".join(buf).strip()
-        title_line = buf[0] if buf else ""
-        items.append(
-            {
-                "title": clean_title(title_line),
-                "when": dates_in(" ".join(buf)),
-                "description": text,
-            }
+        r = requests.post(
+            "https://api.openai.com/v1/responses",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "input": prompt,
+                "response_format": {"type": "json_schema", "json_schema": schema},
+                "max_output_tokens": 2000,
+            },
+            timeout=45,
         )
-        buf.clear()
+        data = r.json()
+        # Responses API (preferred)
+        out_text = ""
+        try:
+            out_text = data["output"][0]["content"][0]["text"]
+        except Exception:
+            # Chat-style fallback
+            out_text = (
+                data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            )
 
-    for ln in lines:
-        if not (ln or "").startswith(("•", "-", "*")) and buf:
-            flush()
-        buf.append(ln or "")
-    flush()
-    return items
+        arr = json.loads(out_text) if out_text else []
+        if not isinstance(arr, list):
+            return []
+        out: List[ExperienceItem] = []
+        for it in arr:
+            out.append(
+                ExperienceItem(
+                    title=it.get("title", ""),
+                    company=it.get("company", ""),
+                    location=it.get("location", ""),
+                    dates=DateSpan(**(it.get("dates") or {})),
+                    bullets=it.get("bullets") or [],
+                    technologies=it.get("technologies") or [],
+                    confidence=float(it.get("confidence") or 0.8),
+                )
+            )
+        return out
+    except Exception:
+        return []
 
 
-def _split_name(full: str) -> tuple[str, str, str]:
-    full = _norm(full)
-    if not full or full == "Unknown":
+================================================================================
+// Path: ats_parser/models.py
+================================================================================
+
+
+from __future__ import annotations
+from pydantic import BaseModel, Field, EmailStr, HttpUrl, ConfigDict
+from typing import List, Optional
+
+class DateSpan(BaseModel):
+    start: Optional[str] = Field(default=None, description="YYYY-MM or None")
+    end: Optional[str] = Field(default=None, description="YYYY-MM or 'Present' or None")
+    months: Optional[int] = None
+
+class ExperienceItem(BaseModel):
+    title: Optional[str] = ""
+    company: Optional[str] = ""
+    location: Optional[str] = ""
+    dates: DateSpan = DateSpan()
+    bullets: List[str] = []
+    technologies: List[str] = []
+    confidence: float = 0.0
+
+class EducationItem(BaseModel):
+    degree: Optional[str] = ""
+    field: Optional[str] = ""
+    school: Optional[str] = ""
+    location: Optional[str] = ""
+    dates: DateSpan = DateSpan()
+    gpa: Optional[str] = None
+
+class Contact(BaseModel):
+    name: Optional[str] = ""
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    location: Optional[str] = None
+    linkedin: Optional[HttpUrl] = None
+    github: Optional[HttpUrl] = None
+    websites: List[HttpUrl] = []
+
+class Resume(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    contact: Contact = Contact()
+    summary: Optional[str] = ""
+    skills: List[str] = []
+    experience: List[ExperienceItem] = []
+    education: List[EducationItem] = []
+    certifications: List[str] = []
+    languages: List[str] = []
+    raw_text: str = ""
+    flags: dict = {}
+
+
+================================================================================
+// Path: ats_parser/parser.py
+================================================================================
+
+from __future__ import annotations
+from typing import List
+from .models import Resume, Contact, ExperienceItem, EducationItem, DateSpan
+from .ingest import read_pdf_text
+from .sections import split_sections
+from . import rules
+from .llm import extract_experience_llm
+from .reconcile import merge_experience
+
+
+def _split_name(full: str):
+    s = (full or "").strip()
+    if not s:
         return "", "", ""
-    parts = full.split()
+    parts = s.split()
     if len(parts) == 1:
         return parts[0], "", ""
     if len(parts) == 2:
@@ -2130,35 +1695,531 @@ def _split_name(full: str) -> tuple[str, str, str]:
     return parts[0], " ".join(parts[1:-1]), parts[-1]
 
 
-def parse_resume(filepath: str) -> Dict:
-    text = _read_pdf_text(filepath)
-    lines = [l for l in (text or "").splitlines()]
-    full_name = _guess_name(lines)
-    first, middle, last = _split_name(full_name)
+def parse_file(path: str) -> Resume:
+    text, ocr_pages = read_pdf_text(path)
+    secs = split_sections(text)
 
-    sections = _split_sections(text)
-    contacts = _extract_contacts(text)
+    contacts = rules.extract_contacts(text)
+    skills_txt = rules.skills_text(secs.get("SKILLS", []))
 
-    education = _parse_education(sections.get("EDUCATION", []))
-    experience = _parse_experience(sections.get("EXPERIENCE", []))
+    exp_rule = [
+        ExperienceItem(
+            title=it["title"],
+            company=it["company"],
+            location=it["location"],
+            dates=DateSpan(**it["dates"]),
+            bullets=it["bullets"],
+            technologies=it["technologies"],
+            confidence=it.get("confidence", 0.55),
+        )
+        for it in rules.fallback_experience(secs.get("EXPERIENCE") or text)
+    ]
+    if not exp_rule:
+        exp_rule = [ExperienceItem(
+            title=it["title"], company=it["company"], location=it["location"],
+            dates=DateSpan(**it["dates"]), bullets=it["bullets"], technologies=it["technologies"],
+            confidence=it.get("confidence",0.55)
+        ) for it in rules.fallback_experience(text)]
+    edu_items: List[EducationItem] = []
 
-    skills_csv = _extract_skills(sections, experience)
+    exp_llm: List[ExperienceItem] = (
+        extract_experience_llm("\n".join(secs.get("EXPERIENCE", []))) or []
+    )
+
+    experience = merge_experience(exp_rule, exp_llm)
+
+    resume = Resume(
+        contact=Contact(
+            name=contacts.get("name", ""),
+            email=contacts.get("email") or None,
+            phone=contacts.get("phone") or None,
+            websites=contacts.get("links") or [],
+        ),
+        summary=" ".join(secs.get("SUMMARY", [])[:5]),
+        skills=[
+            s.strip()
+            for s in (skills_txt.split(",") if skills_txt else [])
+            if s.strip()
+        ],
+        experience=experience,
+        education=edu_items,
+        certifications=[],
+        languages=[],
+        raw_text=text,
+        flags={
+            "used_ocr": bool(ocr_pages),
+            "sections_found": {k: len(v or []) for k, v in secs.items()},
+        },
+    )
+    return resume
+
+
+def parse_bytes(data: bytes) -> Resume:
+    import tempfile, os
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(data)
+        tmp.flush()
+        path = tmp.name
+    try:
+        return parse_file(path)
+    finally:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
+
+def adapt_for_backend(resume: Resume) -> dict:
+    name = resume.contact.name or ""
+
+    def _split_name(full: str):
+        s = (full or "").strip()
+        if not s:
+            return "", "", ""
+        parts = s.split()
+        if len(parts) == 1:
+            return parts[0], "", ""
+        if len(parts) == 2:
+            return parts[0], "", parts[1]
+        return parts[0], " ".join(parts[1:-1]), parts[-1]
+
+    first, middle, last = _split_name(name)
+
+    # Flatten experience for your UI
+    exp_flat = []
+    for e in resume.experience:
+        exp_flat.append(
+            {
+                "position": e.title or "",
+                "company_name": e.company or "",
+                "location": e.location or "",
+                "start_date": (e.dates.start or ""),
+                "end_date": (e.dates.end or ""),
+                "duration_months": e.dates.months,
+                "description": "\n".join(e.bullets).strip(),
+            }
+        )
+
+    # Flatten education similarly (if you add education later)
+    edu_flat = []
+    for ed in resume.education:
+        # try to pull years from ed.dates.start/end if they exist like 'YYYY-MM'
+        sy = (ed.dates.start or "")[:4] if (ed.dates and ed.dates.start) else ""
+        ey = (ed.dates.end or "")[:4] if (ed.dates and ed.dates.end) else ""
+        edu_flat.append(
+            {
+                "level": ed.degree or "",
+                "field": ed.field or "",
+                "school_name": ed.school or "",
+                "location": ed.location or "",
+                "start_year": sy,
+                "end_year": ey,
+            }
+        )
 
     return {
-        "name": _norm(" ".join([p for p in [first, middle, last] if p])),
+        "name": name,
         "first_name": first,
         "middle_name": middle,
         "last_name": last,
-        "phone": contacts.get("phone", ""),
-        "email": contacts.get("email", ""),
-        "links": contacts.get("urls", []),
-        "education": education,
-        "experience": experience,
-        # projects intentionally removed from payload
-        "skills": skills_csv,
-        "languages": "",
-        "raw_text": text or "",
+        "phone": resume.contact.phone or "",
+        "email": str(resume.contact.email) if resume.contact.email else "",
+        "links": [str(u) for u in (resume.contact.websites or [])],
+        "education": edu_flat,  # <- flattened for your template
+        "experience": exp_flat,  # <- flattened for your template
+        "skills": ", ".join(resume.skills),
+        "languages": ", ".join(resume.languages),
+        "raw_text": resume.raw_text,
     }
+
+
+================================================================================
+// Path: ats_parser/reconcile.py
+================================================================================
+
+from __future__ import annotations
+from typing import List
+from rapidfuzz import fuzz
+from .models import ExperienceItem
+
+
+def dedupe_keep_order(items: List[str]) -> List[str]:
+    seen = set()
+    out = []
+    for s in items:
+        key = s.strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(s.strip())
+    return out
+
+
+def merge_experience(
+    rule_items: List[ExperienceItem], llm_items: List[ExperienceItem]
+) -> List[ExperienceItem]:
+    if not llm_items:
+        return rule_items
+    if not rule_items:
+        return llm_items
+    out: List[ExperienceItem] = []
+    used = [False] * len(llm_items)
+    for r in rule_items:
+        best_i, best = -1, 0
+        for i, l in enumerate(llm_items):
+            if used[i]:
+                continue
+            score = 0
+            if r.company and l.company:
+                score += fuzz.token_set_ratio(r.company, l.company)
+            if r.title and l.title:
+                score += fuzz.token_set_ratio(r.title, l.title)
+            if score > best:
+                best = score
+                best_i = i
+        if best >= 120:
+            l = llm_items[best_i]
+            used[best_i] = True
+            merged = ExperienceItem(
+                title=l.title or r.title,
+                company=l.company or r.company,
+                location=l.location or r.location,
+                dates=l.dates if (l.dates.start or l.dates.end) else r.dates,
+                bullets=l.bullets or r.bullets,
+                technologies=list({*r.technologies, *l.technologies}),
+                confidence=max(r.confidence, l.confidence),
+            )
+            out.append(merged)
+        else:
+            out.append(r)
+    for i, l in enumerate(llm_items):
+        if not used[i]:
+            out.append(l)
+    return out
+
+
+================================================================================
+// Path: ats_parser/rules.py
+================================================================================
+
+from __future__ import annotations
+import re
+from typing import List, Tuple
+from datetime import datetime
+import phonenumbers
+try:
+    import dateparser
+except Exception:
+    dateparser = None
+
+EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+LINK = re.compile(r"\b(?:https?://|www\.)[^\s)]+", re.I)
+MONTHS = (
+    r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+)
+YEAR = r"(?:19|20)\d{2}"
+NUM_MMYYYY = r"(?:0?[1-9]|1[0-2])[-/\.](?:\d{4})"
+PRESENT = r"(?:Present|Current|Now|Today)"
+RANGE_SEP = r"(?:\s*(?:-|–|—|to)\s*)"
+DATE_TOKEN = rf"(?:{MONTHS}\s+{YEAR}|{YEAR}|{NUM_MMYYYY})"
+DATE_RE = re.compile(
+    rf"(?P<start>{DATE_TOKEN}){RANGE_SEP}(?P<end>{DATE_TOKEN}|{PRESENT})", re.I
+)
+
+BULLET = re.compile(r"^(\s*[-•‣∙·*]\s+)")
+TITLE_HINT = re.compile(
+    r"\b(senior|sr\.?|jr\.?|junior|lead|principal|staff|head|director|manager|"
+    r"engineer|developer|analyst|consultant|architect|intern)\b",
+    re.I,
+)
+COMPANY_SUFFIX = re.compile(
+    r"\b(inc\.?|corp\.?|llc|ltd\.?|co\.?|company|capital|fund|bank|group|partners?|"
+    r"systems?|labs?|studio|technolog(?:y|ies)|solutions?)\b",
+    re.I,
+)
+
+
+def norm(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip())
+
+
+def parse_date_range(s: str):
+    m = DATE_RE.search(s or "")
+
+    def to_ym(tok: str):
+        if not tok:
+            return None
+        if re.fullmatch(PRESENT, tok, re.I):
+            return "Present"
+        # Try simple numeric patterns first
+        if re.fullmatch(YEAR, tok):
+            return f"{tok}-01"
+        mm = re.match(r"(0?[1-9]|1[0-2])[-/\.]([0-9]{4})", tok)
+        if mm:
+            return f"{mm.group(2)}-{int(mm.group(1)):02d}"
+        # Month name forms (EN/FR) via dateparser
+        dt = dateparser.parse(tok, languages=["en", "fr"]) if dateparser else None
+        if dt:
+            return f"{dt.year}-{dt.month:02d}"
+        return None
+
+    if m:
+        s_norm, e_norm = to_ym(m.group("start")), to_ym(m.group("end"))
+        # compute months
+        months = None
+        try:
+            if s_norm and e_norm and e_norm != "Present":
+                ys, ms = map(int, s_norm.split("-"))
+                ye, me = map(int, e_norm.split("-"))
+                months = (ye - ys) * 12 + (me - ms) + 1
+        except Exception:
+            months = None
+        return s_norm, e_norm, months
+
+    # Fallback: split on common separators and parse both sides
+    for sep in [" - ", " – ", " — ", " to ", "–", "—", "-", "– ", " — "]:
+        if sep in s:
+            left, right = s.split(sep, 1)
+            ls, rs = to_ym(left.strip()), to_ym(right.strip())
+            if ls or rs:
+                months = None
+                try:
+                    if ls and rs and rs != "Present":
+                        ys, ms = map(int, ls.split("-"))
+                        ye, me = map(int, rs.split("-"))
+                        months = (ye - ys) * 12 + (me - ms) + 1
+                except Exception:
+                    months = None
+                return ls, rs, months
+
+    return None, None, None
+
+
+def extract_contacts(text: str) -> dict:
+    emails = EMAIL.findall(text) or []
+    links = list(dict.fromkeys(LINK.findall(text)))[:5]
+    phone = None
+    for m in phonenumbers.PhoneNumberMatcher(text, "CA"):
+        phone = phonenumbers.format_number(
+            m.number, phonenumbers.PhoneNumberFormat.INTERNATIONAL
+        )
+        break
+    # naive name guess: first line with 2-4 TitleCased tokens
+    name = ""
+    for ln in text.splitlines()[:12]:
+        s = norm(ln)
+        if not s or len(s) > 60:
+            continue
+        if any(ch.isdigit() for ch in s):
+            continue
+        toks = [t for t in s.split() if re.match(r"^[A-Z][a-zA-Z-]+$", t)]
+        if 2 <= len(toks) <= 4:
+            name = s
+            break
+    return {
+        "email": emails[0] if emails else "",
+        "phone": phone or "",
+        "links": links,
+        "name": name,
+    }
+
+
+def _looks_like_title(s: str) -> bool:
+    s = norm(s)
+    if not s or s.endswith("."):
+        return False
+    if TITLE_HINT.search(s):
+        return True
+    toks = [t for t in s.split() if t.isalpha()]
+    if not toks:
+        return False
+    caps = sum(1 for t in toks if t[0].isupper() and not t.isupper())
+    return caps / len(toks) >= 0.6 and len(toks) <= 7
+
+
+VERB_HINT = re.compile(
+    r"\b(built|designed|developed|managed|led|mentored|supported|created|owned|implemented|improved|analyzed|wrote|drove|delivered)\b",
+    re.I,
+)
+
+
+def _looks_like_company(s: str) -> bool:
+    s = norm(s)
+    if not s or s.lower().startswith(("http://", "https://", "www.")):
+        return False
+    if VERB_HINT.search(s):
+        return False
+    if COMPANY_SUFFIX.search(s):
+        return True
+    toks = [t for t in s.split() if t.isalpha()]
+    if 2 <= len(toks) <= 6:
+        caps = sum(1 for t in toks if t[0].isupper() and not t.isupper())
+        if caps >= 2 and len(s) <= 48:
+            return True
+    return False
+
+
+def _guess_title_company_from_buffer(buf: list[str]) -> tuple[str, str]:
+    window = [norm(x) for x in buf if norm(x)][-6:]
+    title, company = "", ""
+    for i in range(len(window) - 1, -1, -1):
+        if _looks_like_company(window[i]):
+            company = window[i]
+            for j in range(i - 1, -1, -1):
+                if _looks_like_title(window[j]):
+                    title = window[j]
+                    break
+            break
+    if not title:
+        for i in range(len(window) - 1, -1, -1):
+            if _looks_like_title(window[i]):
+                title = window[i]
+                break
+    if not company:
+        for i in range(len(window) - 1, -1, -1):
+            if _looks_like_company(window[i]):
+                company = window[i]
+                break
+    return title, company
+
+
+def fallback_experience(text_or_lines) -> list[dict]:
+    lines = [
+        norm(l)
+        for l in (
+            text_or_lines
+            if isinstance(text_or_lines, list)
+            else (text_or_lines or "").splitlines()
+        )
+        if norm(l)
+    ]
+    items, i, n = [], 0, len(lines)
+
+    def gather_desc(start_idx: int):
+        buf, j = [], start_idx
+        while j < n:
+            s = lines[j]
+            if DATE_RE.search(s):
+                break
+            if _looks_like_title(s) or _looks_like_company(s):
+                break
+            if len(s) > 110:
+                break
+            buf.append(BULLET.sub("", s))
+            j += 1
+        return ("\n".join(buf).strip(), j)
+
+    while i < n:
+        line = lines[i]
+        if not DATE_RE.search(line):
+            i += 1
+            continue
+        start, end, months = parse_date_range(line)
+        ctx = lines[max(0, i - 5) : i]
+        title, company = _guess_title_company_from_buffer(ctx)
+        desc, stop = gather_desc(i + 1)
+        if title or company or desc:
+            items.append(
+                {
+                    "title": title,
+                    "company": company,
+                    "location": "",
+                    "dates": {"start": start, "end": end, "months": months},
+                    "bullets": [b for b in (desc.split("\n") if desc else []) if b],
+                    "technologies": [],
+                    "confidence": 0.55,
+                }
+            )
+        i = max(i + 1, stop)
+    # dedupe
+    seen, uniq = set(), []
+    for it in items:
+        key = (
+            it["company"].lower(),
+            it["title"].lower(),
+            it["dates"]["start"],
+            it["dates"]["end"],
+        )
+        if key not in seen:
+            seen.add(key)
+            uniq.append(it)
+    return uniq
+
+
+def skills_text(lines: list[str]) -> str:
+    # stop if we hit sentences/dates/other sections; then split on separators
+    out = []
+    for l in lines or []:
+        s = norm(re.sub(r"^[\-•*]\s*", "", l))
+        if not s:
+            continue
+        if DATE_RE.search(s):
+            break
+        if re.search(r"\b(education|experience|projects?|languages?)\b", s, re.I):
+            break
+        if len(s) > 80 and re.search(
+            r"\b(built|designed|developed|managed|worked|implemented|created)\b",
+            s,
+            re.I,
+        ):
+            break
+        out.append(s)
+    tokens = []
+    for chunk in re.split(r"[,;/|]", " ".join(out)):
+        token = norm(chunk)
+        if len(token) >= 2:
+            tokens.append(token)
+    tokens = list(dict.fromkeys(tokens))
+    return ", ".join(tokens)[:1000]
+
+
+================================================================================
+// Path: ats_parser/sections.py
+================================================================================
+
+import re
+
+
+def split_sections(text: str) -> dict[str, list[str]]:
+    SECTION_PATTERNS = {
+        "SUMMARY": re.compile(
+            r"^(summary|professional summary|profile)\b[:\-–—]?", re.I
+        ),
+        "EXPERIENCE": re.compile(
+            r"^(experience|work (?:history|experience)|employment|professional experience|projects?)\b[:\-–—]?",
+            re.I,
+        ),
+        "EDUCATION": re.compile(
+            r"^(education|academic background|studies)\b[:\-–—]?", re.I
+        ),
+        "SKILLS": re.compile(
+            r"^(skills|technical skills|technologies|tooling|competenc(?:y|ies))\b[:\-–—]?",
+            re.I,
+        ),
+        "CERTS": re.compile(r"^(certifications?|licenses?)\b[:\-–—]?", re.I),
+        "LANGUAGES": re.compile(r"^(languages?)\b[:\-–—]?", re.I),
+        "PROJECTS": re.compile(
+            r"^(projects|selected projects|personal projects)\b[:\-–—]?", re.I
+        ),
+    }
+    lines = [l.rstrip() for l in text.splitlines()]
+    cur = None
+    out = {k: [] for k in SECTION_PATTERNS.keys()}
+    out.setdefault("OTHER", [])
+    for ln in lines:
+        s = re.sub(r"\s+", " ", (ln or "").strip())
+        if not s:
+            continue
+        switched = False
+        for key, rx in SECTION_PATTERNS.items():
+            if rx.match(s):
+                cur = key
+                switched = True
+                break
+        if not switched:
+            (out[cur] if cur else out["OTHER"]).append(s)
+    return out
 
 
 ================================================================================
@@ -2235,6 +2296,8 @@ def parse_resume(filepath: str) -> Dict:
             radial-gradient(1000px 500px at 120% 10%, rgba(16, 185, 129, .10), transparent 60%),
             var(--bg);
         color: var(--text);
+        background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, no-repeat;
+        background-attachment: fixed, fixed, fixed, fixed, fixed;
         font: 15px/1.5 Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     }
 
@@ -3155,4 +3218,4 @@ def parse_resume(filepath: str) -> Dict:
 </html>
 
 
-// Summary: wrote 15 files, skipped 34364 files.
+// Summary: wrote 23 files, skipped 55387 files.

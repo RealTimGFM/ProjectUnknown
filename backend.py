@@ -78,7 +78,8 @@ def admin_required(fn):
 
 @app.before_request
 def enforce_idle_timeout():
-    now = datetime.utcnow().timestamp()
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).timestamp()
     last = session.get("last_seen")
     if session.get("user_id"):
         if last and (now - last) > (IDLE_TIMEOUT_MIN * 60):
@@ -120,7 +121,8 @@ def signup():
         session.clear()
         session.permanent = True
         session["user_id"] = uid
-        session["last_seen"] = datetime.utcnow().timestamp()
+        from datetime import datetime, timezone
+        session["last_seen"] = datetime.now(timezone.utc).timestamp()
         flash("Account created. Welcome!", "success")
         return redirect(url_for("index"))
     return render_template("auth_signup.html")
@@ -356,7 +358,7 @@ def index():
                 education, experience, skills, languages, raw_text)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                parsed["name"],
+                parsed.get("name",""),
                 parsed.get("first_name", ""),
                 parsed.get("middle_name", ""),
                 parsed.get("last_name", ""),
