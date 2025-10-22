@@ -4,7 +4,7 @@ from .models import Resume, Contact, ExperienceItem, EducationItem, DateSpan
 from .ingest import read_pdf_text
 from .sections import split_sections
 from . import rules
-from .llm import extract_experience_llm
+from .llm import extract_experience_llm, extract_education_llm
 from .reconcile import merge_experience
 
 
@@ -25,7 +25,11 @@ def parse_file(path: str) -> Resume:
     secs = split_sections(text)
 
     contacts = rules.extract_contacts(text)
-    skills_txt = rules.skills_text(secs.get("SKILLS", []))
+    skills_list = rules.extract_skills(secs.get("SKILLS", []))
+    if not skills_list:
+        # fallback if the splitter missed the section heading
+        skills_list = rules.extract_skills_from_text(text)
+
 
     exp_rule = [
         ExperienceItem(
@@ -40,12 +44,36 @@ def parse_file(path: str) -> Resume:
         for it in rules.fallback_experience(secs.get("EXPERIENCE") or text)
     ]
     if not exp_rule:
-        exp_rule = [ExperienceItem(
-            title=it["title"], company=it["company"], location=it["location"],
-            dates=DateSpan(**it["dates"]), bullets=it["bullets"], technologies=it["technologies"],
-            confidence=it.get("confidence",0.55)
-        ) for it in rules.fallback_experience(text)]
-    edu_items: List[EducationItem] = []
+        exp_rule = [
+            ExperienceItem(
+                title=it["title"],
+                company=it["company"],
+                location=it["location"],
+                dates=DateSpan(**it["dates"]),
+                bullets=it["bullets"],
+                technologies=it["technologies"],
+                confidence=it.get("confidence", 0.55),
+            )
+            for it in rules.fallback_experience(text)
+        ]
+    # ----- EDUCATION -----
+    edu_lines = secs.get("EDUCATION") or []
+    edu_rule = [
+        EducationItem(
+            degree=it["degree"],
+            field=it["field"],
+            school=it["school"],
+            location=it["location"],
+            dates=DateSpan(**it["dates"]),
+            gpa=it.get("gpa"),
+        )
+        for it in (rules.fallback_education(edu_lines) if edu_lines else [])
+    ]
+
+    edu_llm: List[EducationItem] = extract_education_llm("\n".join(edu_lines)) or []
+
+    # Prefer deterministic rules; fall back to LLM only if rules found nothing
+    education = edu_rule or edu_llm
 
     exp_llm: List[ExperienceItem] = (
         extract_experience_llm("\n".join(secs.get("EXPERIENCE", []))) or []
@@ -61,13 +89,9 @@ def parse_file(path: str) -> Resume:
             websites=contacts.get("links") or [],
         ),
         summary=" ".join(secs.get("SUMMARY", [])[:5]),
-        skills=[
-            s.strip()
-            for s in (skills_txt.split(",") if skills_txt else [])
-            if s.strip()
-        ],
+        skills=skills_list,
         experience=experience,
-        education=edu_items,
+        education=education,
         certifications=[],
         languages=[],
         raw_text=text,
@@ -129,9 +153,11 @@ def adapt_for_backend(resume: Resume) -> dict:
     # Flatten education similarly (if you add education later)
     edu_flat = []
     for ed in resume.education:
-        # try to pull years from ed.dates.start/end if they exist like 'YYYY-MM'
         sy = (ed.dates.start or "")[:4] if (ed.dates and ed.dates.start) else ""
-        ey = (ed.dates.end or "")[:4] if (ed.dates and ed.dates.end) else ""
+        if ed.dates and ed.dates.end == "Present":
+            ey = "Present"
+        else:
+            ey = (ed.dates.end or "")[:4] if (ed.dates and ed.dates.end) else ""
         edu_flat.append(
             {
                 "level": ed.degree or "",

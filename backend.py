@@ -12,7 +12,7 @@ from flask import (
 import sqlite3, os, json, uuid
 from resume_parser import parse_resume
 from werkzeug.utils import secure_filename
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
 import secrets
 
@@ -78,7 +78,6 @@ def admin_required(fn):
 
 @app.before_request
 def enforce_idle_timeout():
-    from datetime import datetime, timezone
     now = datetime.now(timezone.utc).timestamp()
     last = session.get("last_seen")
     if session.get("user_id"):
@@ -106,7 +105,7 @@ def signup():
                 (
                     username,
                     generate_password_hash(password),
-                    datetime.utcnow().isoformat(),
+                    datetime.now(timezone.utc).isoformat(),   # aware ISO8601
                 ),
             )
             conn.commit()
@@ -121,7 +120,6 @@ def signup():
         session.clear()
         session.permanent = True
         session["user_id"] = uid
-        from datetime import datetime, timezone
         session["last_seen"] = datetime.now(timezone.utc).timestamp()
         flash("Account created. Welcome!", "success")
         return redirect(url_for("index"))
@@ -151,7 +149,7 @@ def login():
         session.clear()
         session.permanent = True
         session["user_id"] = row[0]
-        session["last_seen"] = datetime.utcnow().timestamp()
+        session["last_seen"] = datetime.now(timezone.utc).timestamp()
         flash("Logged in successfully.", "success")
         return redirect(next_url)
     return render_template("auth_login.html", next=request.args.get("next"))
@@ -179,7 +177,7 @@ def reset_request():
 
         uid = row[0]
         token = secrets.token_urlsafe(24)
-        expires = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
+        expires = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
         c.execute(
             "INSERT INTO reset_tokens (user_id, token, expires_at) VALUES (?,?,?)",
             (uid, token, expires),
@@ -210,7 +208,7 @@ def reset_form(token):
         conn.close()
         flash("This token was already used.", "error")
         return redirect(url_for("reset_request"))
-    if datetime.utcnow() > datetime.fromisoformat(expires_at):
+    if datetime.now(timezone.utc) > datetime.fromisoformat(expires_at):
         conn.close()
         flash("Token expired.", "error")
         return redirect(url_for("reset_request"))

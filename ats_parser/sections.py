@@ -14,7 +14,11 @@ def split_sections(text: str) -> dict[str, list[str]]:
             r"^(education|academic background|studies)\b[:\-–—]?", re.I
         ),
         "SKILLS": re.compile(
-            r"^(skills|technical skills|technologies|tooling|competenc(?:y|ies))\b[:\-–—]?",
+            r"^(skills?|technical skills?|technologies|tools|tooling|"
+            r"tech(?:nical)?(?:\s+stack)?|stack|"
+            r"proficiencies|expertise|core (?:skills|competencies)|competenc(?:y|ies)|"
+            r"programming languages?|frameworks?(?:\s*&\s*| and )?libraries|frameworks|libraries|"
+            r"software|platforms|databases)\b[:\-–—]?",
             re.I,
         ),
         "CERTS": re.compile(r"^(certifications?|licenses?)\b[:\-–—]?", re.I),
@@ -34,8 +38,13 @@ def split_sections(text: str) -> dict[str, list[str]]:
         switched = False
         for key, rx in SECTION_PATTERNS.items():
             if rx.match(s):
+                m = rx.match(s)
                 cur = key
                 switched = True
+                # NEW: keep anything after the heading, e.g. "Skills: C#, Java"
+                tail = s[m.end():].strip(" :–—-")
+                if tail:
+                    out[cur].append(tail)
                 break
         if not switched:
             (out[cur] if cur else out["OTHER"]).append(s)
