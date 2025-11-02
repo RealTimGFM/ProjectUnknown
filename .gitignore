@@ -1,2 +1,5 @@
 dump.txt
 *.pdf
+.venv
+*cache*
+database.db

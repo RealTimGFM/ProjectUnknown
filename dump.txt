@@ -2,9 +2,9 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-10-22T03:33:07Z
-Root: C:\Users\User\Documents\GitHub\ProjectUnknown
-Python: 3.13.5
+Generated: 2025-10-31T14:48:26Z
+Root: C:\Users\TimGFM\Documents\GitHub\ProjectUnknown
+Python: 3.11.9
 
 ================================================================================
 PROJECT TREE
@@ -30,12 +30,6 @@ ProjectUnknown/
 │   ├── auth_reset_set.html
 │   ├── auth_signup.html
 │   └── index.html
-├── uploads/
-│   ├── 3ef8e9a214d34910b09df60e18d49b09_CV-Canada.pdf
-│   ├── 93bcd6fccd3d42bfa1a266cbb89d96e9_TestResume.pdf
-│   ├── ada0caea98fa4395b4397cb8861d6813_QuyVuLuong_CV.pdf
-│   ├── b593a83b5d794210ab5d3fcb85c6101e_CV-Canada.pdf
-│   └── b8a03c9f041b48a8a8cf17d243b007f4_QuyVuLuong_CV.pdf
 ├── .gitattributes
 ├── .gitignore
 ├── backend.py
@@ -46,7 +40,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 3  Files: 31
+Directories: 2  Files: 26
 
 ================================================================================
 FILE CONTENTS
@@ -555,9 +549,9 @@ if __name__ == "__main__":
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-10-22T03:33:07Z
-Root: C:\Users\User\Documents\GitHub\ProjectUnknown
-Python: 3.13.5
+Generated: 2025-10-31T14:48:26Z
+Root: C:\Users\TimGFM\Documents\GitHub\ProjectUnknown
+Python: 3.11.9
 
 ================================================================================
 PROJECT TREE
@@ -583,12 +577,6 @@ ProjectUnknown/
 │   ├── auth_reset_set.html
 │   ├── auth_signup.html
 │   └── index.html
-├── uploads/
-│   ├── 3ef8e9a214d34910b09df60e18d49b09_CV-Canada.pdf
-│   ├── 93bcd6fccd3d42bfa1a266cbb89d96e9_TestResume.pdf
-│   ├── ada0caea98fa4395b4397cb8861d6813_QuyVuLuong_CV.pdf
-│   ├── b593a83b5d794210ab5d3fcb85c6101e_CV-Canada.pdf
-│   └── b8a03c9f041b48a8a8cf17d243b007f4_QuyVuLuong_CV.pdf
 ├── .gitattributes
 ├── .gitignore
 ├── backend.py
@@ -599,7 +587,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 3  Files: 31
+Directories: 2  Files: 26
 
 ================================================================================
 FILE CONTENTS
@@ -2141,6 +2129,20 @@ _SKILL_CANON = {
     "Scikit-learn": [r"\bscikit[- ]?learn\b|\bsklearn\b"],
     "PyTorch": [r"\bpytorch\b"],
     "TensorFlow": [r"\btensorflow\b"],
+    "ASP.NET": [r"\basp\.?net(?:\s*core)?\b"],
+    "SQL Server": [r"\bsql\s*server\b", r"\bmssql\b"],
+    "GitHub": [r"\bgithub\b"],
+    "Bash": [r"\bbash\b"],
+    "Shell": [r"\bshell\b", r"\bsh\b"],
+    "PowerShell": [r"\bpowershell\b", r"\bps\b"],
+    "VS Code": [r"\bvs\s*code\b", r"\bvisual\s+studio\s+code\b"],
+    "Visual Studio": [r"\bvisual\s+studio\b"],
+    "IIS": [r"\biis\b"],
+    "Tomcat": [r"\btomcat\b"],
+    "React Native": [r"\breact\s+native\b"],
+    "Express": [r"\bexpress(?:\.js)?\b"],
+    "SBERT": [r"\bsbert\b"],
+    "NLP": [r"\bnlp\b"],
 }
 
 # very small soft-skills set to ignore (only removes when clearly isolated)
@@ -2727,15 +2729,17 @@ def extract_skills_from_text(text: str) -> list[str]:
     lines = [norm(l) for l in (text or "").splitlines() if norm(l)]
     i = 0
     while i < len(lines):
-        if SKILLS_HEAD.match(lines[i]):
-            # capture following lines until next section-ish heading or blank-ish break
+        m = SKILLS_HEAD.match(lines[i])
+        if m:
             buf = []
+            tail = lines[i][m.end() :].strip(" :–—-")
+            if tail:
+                buf.append(tail)
             j = i + 1
             while j < len(lines):
                 s = lines[j]
                 if NEXT_SECTION_HEAD.match(s):
                     break
-                # stop if it looks like a long sentence paragraph (not typical for skills)
                 if len(s) > 140 and re.search(
                     r"\b(built|designed|developed|managed|implemented|created)\b",
                     s,
@@ -2793,8 +2797,13 @@ def split_sections(text: str) -> dict[str, list[str]]:
         switched = False
         for key, rx in SECTION_PATTERNS.items():
             if rx.match(s):
+                m = rx.match(s)
                 cur = key
                 switched = True
+                # NEW: keep anything after the heading, e.g. "Skills: C#, Java"
+                tail = s[m.end():].strip(" :–—-")
+                if tail:
+                    out[cur].append(tail)
                 break
         if not switched:
             (out[cur] if cur else out["OTHER"]).append(s)
@@ -3797,4 +3806,4 @@ def split_sections(text: str) -> dict[str, list[str]]:
 </html>
 
 
-// Summary: wrote 23 files, skipped 55420 files.
+// Summary: wrote 23 files, skipped 38745 files.
