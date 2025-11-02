@@ -8,6 +8,7 @@ from flask import (
     url_for,
     session,
     flash,
+    send_from_directory,
 )
 import sqlite3, os, json, uuid
 from resume_parser import parse_resume
@@ -105,7 +106,7 @@ def signup():
                 (
                     username,
                     generate_password_hash(password),
-                    datetime.now(timezone.utc).isoformat(),   # aware ISO8601
+                    datetime.now(timezone.utc).isoformat(),  # aware ISO8601
                 ),
             )
             conn.commit()
@@ -356,7 +357,7 @@ def index():
                 education, experience, skills, languages, raw_text)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                parsed.get("name",""),
+                parsed.get("name", ""),
                 parsed.get("first_name", ""),
                 parsed.get("middle_name", ""),
                 parsed.get("last_name", ""),
@@ -427,6 +428,53 @@ def update_candidate(cand_id: int):
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
+
+
+@app.route("/admin/cvs")
+@admin_required
+def admin_cvs():
+    base = "uploads"
+    os.makedirs(base, exist_ok=True)
+
+    # 1) get files, newest first
+    files = [
+        (f, os.path.getmtime(os.path.join(base, f)))
+        for f in os.listdir(base)
+        if f.lower().endswith(".pdf")
+    ]
+    files.sort(key=lambda x: x[1], reverse=True)
+    files = [f for f, _ in files]
+
+    # 2) get candidates, newest first
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, name, first_name, middle_name, last_name FROM candidates ORDER BY id DESC"
+    )
+    rows = c.fetchall()
+    conn.close()
+
+    # 3) zip them
+    items = []
+    for i, fname in enumerate(files):
+        if i < len(rows):
+            cid, name, fn, mn, ln = rows[i]
+            full = (
+                name
+                or " ".join([fn or "", mn or "", ln or ""]).strip()
+                or f"Candidate #{cid}"
+            )
+        else:
+            cid, full = None, "Unknown uploader"
+        items.append({"filename": fname, "candidate_id": cid, "display_name": full})
+
+    return render_template("admin_cvs.html", items=items)
+
+
+@app.route("/admin/cvs/<path:filename>")
+@admin_required
+def admin_download_cv(filename):
+    return send_from_directory("uploads", filename, as_attachment=True)
 
 
 if __name__ == "__main__":

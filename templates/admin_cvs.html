@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>All CVs – ATS Scanner</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>
+        :root {
+            --bg: #0b0f1a;
+            --card: #0f1422;
+            --muted: #9aa3af;
+            --accent: #3b82f6;
+            --border: #1f2937;
+            --text: #e5e7eb;
+        }
+
+        body {
+            margin: 0;
+            font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        main {
+            max-width: 1100px;
+            margin: 20px auto;
+            padding: 0 16px;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 18px;
+            margin: 16px 0;
+        }
+
+        .btn {
+            border: 1px solid var(--border);
+            background: #0b1120;
+            color: var(--text);
+            padding: 8px 12px;
+            border-radius: 8px;
+            text-decoration: none;
+        }
+
+        a.download {
+            color: #93c5fd;
+            text-decoration: none;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        li {
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, .03);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        small {
+            color: var(--muted);
+        }
+    </style>
+    {% include "_theme.html" %}
+</head>
+
+<body>
+    <header style="padding:20px;background:#0a0f1d;border-bottom:1px solid var(--border);">
+        <h1 style="margin:0;font-size:20px;">All CVs (PDF)</h1>
+    </header>
+    <main>
+        <nav class="card" style="display:flex;gap:12px;justify-content:space-between;align-items:center;">
+            <div>
+                <a class="btn" href="/">Home</a>
+                <a class="btn" href="/admin">Admin</a>
+                <a class="btn" href="{{ url_for('admin_cvs') }}">All CVs</a>
+            </div>
+            <a class="btn" href="/logout">Log out</a>
+        </nav>
+
+        <div class="card">
+            {% if items %}
+            <ul>
+                {% for it in items %}
+                <li>
+                    <div>
+                        <strong>{{ it.display_name }}</strong><br>
+                        <small>{{ it.filename }}</small>
+                    </div>
+                    <a class="btn" href="{{ url_for('admin_download_cv', filename=it.filename) }}">Download</a>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p>No CVs uploaded yet.</p>
+            {% endif %}
+        </div>
+
+    </main>
+</body>
+
+</html>

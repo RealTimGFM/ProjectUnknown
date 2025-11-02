@@ -2,9 +2,9 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-10-31T14:48:26Z
-Root: C:\Users\TimGFM\Documents\GitHub\ProjectUnknown
-Python: 3.11.9
+Generated: 2025-11-02T17:17:48Z
+Root: C:\Users\User\Documents\GitHub\ProjectUnknown
+Python: 3.13.5
 
 ================================================================================
 PROJECT TREE
@@ -24,23 +24,24 @@ ProjectUnknown/
 │   ├── _flash.html
 │   ├── _theme.html
 │   ├── admin_candidates.html
+│   ├── admin_cvs.html
 │   ├── admin_home.html
 │   ├── auth_login.html
 │   ├── auth_reset_request.html
 │   ├── auth_reset_set.html
 │   ├── auth_signup.html
 │   └── index.html
+├── uploads/
 ├── .gitattributes
 ├── .gitignore
 ├── backend.py
-├── database.db
 ├── dump.txt
 ├── dump_project.py
 ├── README.md
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 2  Files: 26
+Directories: 3  Files: 26
 
 ================================================================================
 FILE CONTENTS
@@ -115,6 +116,7 @@ from flask import (
     url_for,
     session,
     flash,
+    send_from_directory,
 )
 import sqlite3, os, json, uuid
 from resume_parser import parse_resume
@@ -212,7 +214,7 @@ def signup():
                 (
                     username,
                     generate_password_hash(password),
-                    datetime.now(timezone.utc).isoformat(),   # aware ISO8601
+                    datetime.now(timezone.utc).isoformat(),  # aware ISO8601
                 ),
             )
             conn.commit()
@@ -463,7 +465,7 @@ def index():
                 education, experience, skills, languages, raw_text)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                parsed.get("name",""),
+                parsed.get("name", ""),
                 parsed.get("first_name", ""),
                 parsed.get("middle_name", ""),
                 parsed.get("last_name", ""),
@@ -534,6 +536,53 @@ def update_candidate(cand_id: int):
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
+
+
+@app.route("/admin/cvs")
+@admin_required
+def admin_cvs():
+    base = "uploads"
+    os.makedirs(base, exist_ok=True)
+
+    # 1) get files, newest first
+    files = [
+        (f, os.path.getmtime(os.path.join(base, f)))
+        for f in os.listdir(base)
+        if f.lower().endswith(".pdf")
+    ]
+    files.sort(key=lambda x: x[1], reverse=True)
+    files = [f for f, _ in files]
+
+    # 2) get candidates, newest first
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, name, first_name, middle_name, last_name FROM candidates ORDER BY id DESC"
+    )
+    rows = c.fetchall()
+    conn.close()
+
+    # 3) zip them
+    items = []
+    for i, fname in enumerate(files):
+        if i < len(rows):
+            cid, name, fn, mn, ln = rows[i]
+            full = (
+                name
+                or " ".join([fn or "", mn or "", ln or ""]).strip()
+                or f"Candidate #{cid}"
+            )
+        else:
+            cid, full = None, "Unknown uploader"
+        items.append({"filename": fname, "candidate_id": cid, "display_name": full})
+
+    return render_template("admin_cvs.html", items=items)
+
+
+@app.route("/admin/cvs/<path:filename>")
+@admin_required
+def admin_download_cv(filename):
+    return send_from_directory("uploads", filename, as_attachment=True)
 
 
 if __name__ == "__main__":
@@ -549,9 +598,9 @@ if __name__ == "__main__":
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-10-31T14:48:26Z
-Root: C:\Users\TimGFM\Documents\GitHub\ProjectUnknown
-Python: 3.11.9
+Generated: 2025-11-02T17:17:48Z
+Root: C:\Users\User\Documents\GitHub\ProjectUnknown
+Python: 3.13.5
 
 ================================================================================
 PROJECT TREE
@@ -571,23 +620,24 @@ ProjectUnknown/
 │   ├── _flash.html
 │   ├── _theme.html
 │   ├── admin_candidates.html
+│   ├── admin_cvs.html
 │   ├── admin_home.html
 │   ├── auth_login.html
 │   ├── auth_reset_request.html
 │   ├── auth_reset_set.html
 │   ├── auth_signup.html
 │   └── index.html
+├── uploads/
 ├── .gitattributes
 ├── .gitignore
 ├── backend.py
-├── database.db
 ├── dump.txt
 ├── dump_project.py
 ├── README.md
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 2  Files: 26
+Directories: 3  Files: 26
 
 ================================================================================
 FILE CONTENTS
@@ -662,6 +712,7 @@ from flask import (
     url_for,
     session,
     flash,
+    send_from_directory,
 )
 import sqlite3, os, json, uuid
 from resume_parser import parse_resume
@@ -759,7 +810,7 @@ def signup():
                 (
                     username,
                     generate_password_hash(password),
-                    datetime.now(timezone.utc).isoformat(),   # aware ISO8601
+                    datetime.now(timezone.utc).isoformat(),  # aware ISO8601
                 ),
             )
             conn.commit()
@@ -1010,7 +1061,7 @@ def index():
                 education, experience, skills, languages, raw_text)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                parsed.get("name",""),
+                parsed.get("name", ""),
                 parsed.get("first_name", ""),
                 parsed.get("middle_name", ""),
                 parsed.get("last_name", ""),
@@ -1081,6 +1132,53 @@ def update_candidate(cand_id: int):
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
+
+
+@app.route("/admin/cvs")
+@admin_required
+def admin_cvs():
+    base = "uploads"
+    os.makedirs(base, exist_ok=True)
+
+    # 1) get files, newest first
+    files = [
+        (f, os.path.getmtime(os.path.join(base, f)))
+        for f in os.listdir(base)
+        if f.lower().endswith(".pdf")
+    ]
+    files.sort(key=lambda x: x[1], reverse=True)
+    files = [f for f, _ in files]
+
+    # 2) get candidates, newest first
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, name, first_name, middle_name, last_name FROM candidates ORDER BY id DESC"
+    )
+    rows = c.fetchall()
+    conn.close()
+
+    # 3) zip them
+    items = []
+    for i, fname in enumerate(files):
+        if i < len(rows):
+            cid, name, fn, mn, ln = rows[i]
+            full = (
+                name
+                or " ".join([fn or "", mn or "", ln or ""]).strip()
+                or f"Candidate #{cid}"
+            )
+        else:
+            cid, full = None, "Unknown uploader"
+        items.append({"filename": fname, "candidate_id": cid, "display_name": full})
+
+    return render_template("admin_cvs.html", items=items)
+
+
+@app.route("/admin/cvs/<path:filename>")
+@admin_required
+def admin_download_cv(filename):
+    return send_from_directory("uploads", filename, as_attachment=True)
 
 
 if __name__ == "__main__":
@@ -3212,6 +3310,120 @@ def split_sections(text: str) -> dict[str, list[str]]:
 </html>
 
 ================================================================================
+// Path: templates/admin_cvs.html
+================================================================================
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>All CVs – ATS Scanner</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>
+        :root {
+            --bg: #0b0f1a;
+            --card: #0f1422;
+            --muted: #9aa3af;
+            --accent: #3b82f6;
+            --border: #1f2937;
+            --text: #e5e7eb;
+        }
+
+        body {
+            margin: 0;
+            font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        main {
+            max-width: 1100px;
+            margin: 20px auto;
+            padding: 0 16px;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 18px;
+            margin: 16px 0;
+        }
+
+        .btn {
+            border: 1px solid var(--border);
+            background: #0b1120;
+            color: var(--text);
+            padding: 8px 12px;
+            border-radius: 8px;
+            text-decoration: none;
+        }
+
+        a.download {
+            color: #93c5fd;
+            text-decoration: none;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        li {
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, .03);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        small {
+            color: var(--muted);
+        }
+    </style>
+    {% include "_theme.html" %}
+</head>
+
+<body>
+    <header style="padding:20px;background:#0a0f1d;border-bottom:1px solid var(--border);">
+        <h1 style="margin:0;font-size:20px;">All CVs (PDF)</h1>
+    </header>
+    <main>
+        <nav class="card" style="display:flex;gap:12px;justify-content:space-between;align-items:center;">
+            <div>
+                <a class="btn" href="/">Home</a>
+                <a class="btn" href="/admin">Admin</a>
+                <a class="btn" href="{{ url_for('admin_cvs') }}">All CVs</a>
+            </div>
+            <a class="btn" href="/logout">Log out</a>
+        </nav>
+
+        <div class="card">
+            {% if items %}
+            <ul>
+                {% for it in items %}
+                <li>
+                    <div>
+                        <strong>{{ it.display_name }}</strong><br>
+                        <small>{{ it.filename }}</small>
+                    </div>
+                    <a class="btn" href="{{ url_for('admin_download_cv', filename=it.filename) }}">Download</a>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p>No CVs uploaded yet.</p>
+            {% endif %}
+        </div>
+
+    </main>
+</body>
+
+</html>
+
+================================================================================
 // Path: templates/admin_home.html
 ================================================================================
 
@@ -3549,7 +3761,7 @@ def split_sections(text: str) -> dict[str, list[str]]:
       <div>
         <a class="btn" href="/">Home</a>
         <a class="btn" href="/admin">Admin</a>
-        <a class="btn" href="/admin/candidates">All CVs</a>
+        <a class="btn" href="{{ url_for('admin_cvs') }}">All CVs</a>
       </div>
       <div>
         <a class="btn" href="/logout">Log out</a>
@@ -3806,4 +4018,4 @@ def split_sections(text: str) -> dict[str, list[str]]:
 </html>
 
 
-// Summary: wrote 23 files, skipped 38745 files.
+// Summary: wrote 24 files, skipped 55432 files.
