@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Admin — Users</title>
+    {% include "_theme.html" %}
+</head>
+
+<body>
+    <main class="container">
+        {% include "_flash.html" %}
+        <div class="card">
+            <h2>Users</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>Active</th>
+                        <th>Admin</th>
+                        <th>Uploads</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for id, username, active, is_admin, uploads in rows %}
+                    <tr>
+                        <td>{{ id }}</td>
+                        <td>{{ username }}</td>
+                        <td>{{ 'Yes' if active else 'No' }}</td>
+                        <td>{{ 'Yes' if is_admin else 'No' }}</td>
+                        <td>{{ uploads }}</td>
+                        <td style="display:flex; gap:.5rem; flex-wrap:wrap">
+                            {% if active %}
+                            <form method="post" action="{{ url_for('deactivate_user', uid=id) }}">
+                                <button class="btn warn" type="submit">Deactivate</button>
+                            </form>
+                            {% else %}
+                            <form method="post" action="{{ url_for('activate_user', uid=id) }}">
+                                <button class="btn" type="submit">Activate</button>
+                            </form>
+                            {% endif %}
+                            <form method="post" action="{{ url_for('admin_reset_user', uid=id) }}">
+                                <button class="btn" type="submit">Reset PW</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div style="margin-top:12px">
+                <a class="btn" href="{{ url_for('index') }}">Back to app</a>
+            </div>
+        </div>
+    </main>
+</body>
+
+</html>

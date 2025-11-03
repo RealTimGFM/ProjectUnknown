@@ -152,6 +152,12 @@
       border-color: var(--accent);
     }
 
+    .btn.destructive {
+      background: #b91c1c;
+      border-color: #b91c1c;
+      color: #fff;
+    }
+
     .section {
       margin-top: 16px;
       padding-top: 16px;
@@ -175,8 +181,11 @@
     <nav class="card" style="display:flex; gap:12px; align-items:center; justify-content:space-between;">
       <div>
         <a class="btn" href="/">Home</a>
+        {% if user and user.is_admin %}
         <a class="btn" href="/admin">Admin</a>
         <a class="btn" href="{{ url_for('admin_cvs') }}">All CVs</a>
+        <a class="btn" href="{{ url_for('admin_users') }}">Admin Users</a>
+        {% endif %}
       </div>
       <div>
         <a class="btn" href="/logout">Log out</a>
@@ -185,10 +194,12 @@
 
     {% include "_flash.html" %}
 
-    <form class="upload" method="POST" enctype="multipart/form-data">
-      <input type="file" name="resume" accept=".pdf" required>
-      <button type="submit">Upload & Parse</button>
+    <form class="upload" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data"
+      onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Uploading…';">
+      <input type="file" name="file" accept=".pdf,.docx" required>
+      <button type="submit" class="btn primary">Upload & Parse</button>
     </form>
+
     {% for c in candidates %}
     {% set cid = c[0] %}
     {% set name = c[1] %}
@@ -202,12 +213,38 @@
     {% set exp = json.loads(c[9] or "[]") %}
     {% set skills = c[10] or "" %}
 
+    <!-- candidate card -->
+    <div class="card" id="card-{{ cid }}">
 
-
-    <div class="card" id="card-{{cid}}">
-      <div class="row" style="justify-content:space-between;">
+      <div class="row" style="justify-content:space-between; align-items:center">
         <h2 style="margin:0">{{ name or "Unnamed Candidate" }}</h2>
-        <div><span class="badge">ID #{{cid}}</span></div>
+
+        <div style="display:flex; gap:8px; align-items:center">
+          <!-- show short number -->
+          <span class="badge">ID #{{ loop.index }}</span>
+
+          <!-- Delete this CV -->
+          <form method="post" action="{{ url_for('delete_cv', cand_id=cid) }}"
+            onsubmit="return confirm('Delete this CV?');" style="display:inline">
+            <button class="btn destructive" type="submit">Delete CV</button>
+          </form>
+
+          <!-- Re-upload this CV -->
+          <form method="post" action="{{ url_for('reupload_cv', cand_id=cid) }}" enctype="multipart/form-data"
+            style="display:inline-flex; gap:6px; align-items:center">
+            <input type="file" name="file" accept=".pdf,.docx" required>
+            <button class="btn" type="submit">Re-upload</button>
+          </form>
+
+          <!-- Clear inputs in this card (front-end only) 
+          <button type="button" class="btn" onclick="clearCard('{{ cid }}')">
+            Clear this card
+          </button>
+          <button type="button" class="btn" onclick="clearAllDescriptions('{{ cid }}')">
+            Clear all Role Descriptions
+          </button>
+          -->
+        </div>
       </div>
 
       <div class="grid section">
@@ -247,7 +284,6 @@
         </div>
       </div>
 
-
       <div class="section">
         <h3>Experience</h3>
         {% if exp|length == 0 %}<p class="muted">No experience parsed.</p>{% endif %}
@@ -279,7 +315,12 @@
             <input id="exp-{{cid}}-{{loop.index0}}-duration_months" value="{{ e.get('duration_months','') }}">
           </div>
           <div class="col-12">
-            <label>Role Description</label>
+            <div class="row" style="justify-content:space-between; align-items:center">
+              <label style="margin:0">Role Description</label>
+              <button type="button" class="btn" onclick="clearField('exp-{{cid}}-{{loop.index0}}-description')">
+                Clear
+              </button>
+            </div>
             <textarea id="exp-{{cid}}-{{loop.index0}}-description">{{ e.get('description','') }}</textarea>
           </div>
         </div>
@@ -320,15 +361,32 @@
         </div>
         {% endfor %}
       </div>
+
       <div class="grid section">
         <div class="col-12">
-          <label>Skills (technical; CSV)</label>
+          <div class="row" style="justify-content:space-between; align-items:center">
+            <label style="margin:0">Skills (technical; CSV)</label>
+            <button type="button" class="btn" onclick="clearField('skills-{{cid}}')">
+              Clear
+            </button>
+          </div>
           <textarea id="skills-{{cid}}">{{ skills }}</textarea>
         </div>
+
       </div>
+
     </div>
+    <!-- end candidate card -->
+
     {% endfor %}
-    <div class="card" style="display:flex; justify-content:flex-end;">
+
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+      <form method="post" action="{{ url_for('account_delete') }}"
+        onsubmit="return confirm('Delete your account and all uploads?');"
+        style="display:flex;gap:8px;align-items:center">
+        <input type="password" name="password" placeholder="Confirm password" required>
+        <button class="btn">Delete my account</button>
+      </form>
       <button type="button" class="btn primary" id="save-all">Save All Changes</button>
     </div>
   </main>
@@ -340,6 +398,17 @@
       const btn = document.getElementById('save-all');
       if (btn) btn.addEventListener('click', saveAllCandidates);
     });
+
+    // NEW: clear only text inputs / textareas for this card
+    function clearCard(id) {
+      document
+        .querySelectorAll(`#card-${id} input, #card-${id} textarea`)
+        .forEach(el => {
+          // don't clear file inputs
+          if (el.type === 'file') return;
+          el.value = '';
+        });
+    }
 
     function collectLinks(cid) {
       const wrap = document.getElementById(`links-${cid}`);
@@ -399,6 +468,23 @@
       };
     }
 
+    function clearField(id) {
+      const el = document.getElementById(id);
+      if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')) {
+        el.value = '';
+        el.dispatchEvent(new Event('input'));
+      }
+    }
+
+    function clearAllDescriptions(cid) {
+      document
+        .querySelectorAll(`#card-${cid} textarea[id^="exp-${cid}-"][id$="-description"]`)
+        .forEach(t => {
+          t.value = '';
+          t.dispatchEvent(new Event('input'));
+        });
+    }
+
     async function saveAllCandidates() {
       const btn = document.getElementById('save-all');
       if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
@@ -425,7 +511,7 @@
         btn.textContent = 'Save All Changes';
       }
       alert(`Saved ${ok} candidate(s)` + (fail ? `, ${fail} failed` : ''));
-    }
+    } 
   </script>
 
 </body>

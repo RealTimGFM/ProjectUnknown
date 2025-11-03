@@ -1,6 +1,7 @@
 # backend.py — Flask upload -> parse -> save -> render
 from flask import (
     Flask,
+    abort,
     request,
     render_template,
     jsonify,
@@ -16,19 +17,67 @@ from werkzeug.utils import secure_filename
 from datetime import timedelta, datetime, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
 import secrets
+from functools import wraps
+
 
 # Optional pure-Python MIME sniff (no system deps). If missing, we just skip.
 try:
     import filetype  # pip install filetype
 except Exception:
     filetype = None
+SCHEMA_SQL = """
+PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    is_admin      INTEGER NOT NULL DEFAULT 0,
+    active        INTEGER NOT NULL DEFAULT 1,      -- US22/US26: deactivate flag
+    created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS candidates (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,                  -- NEW: owner (US15/US27)
+    name        TEXT,
+    first_name  TEXT,
+    middle_name TEXT,
+    last_name   TEXT,
+    phone       TEXT,
+    email       TEXT,
+    links       TEXT,                              -- JSON string
+    education   TEXT,                              -- JSON string
+    experience  TEXT,                              -- JSON string
+    skills      TEXT,
+    languages   TEXT,
+    raw_text    TEXT,
+    filepath    TEXT,                              -- NEW: saved file path
+    created_at  TEXT NOT NULL,                     -- NEW: audit/sorting
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Optional: if you already support password resets
+CREATE TABLE IF NOT EXISTS reset_tokens (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    token      TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    used       INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+"""
 app = Flask(__name__)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=bool(os.environ.get("COOKIE_SECURE", "0") == "1"),
+)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 app.permanent_session_lifetime = timedelta(minutes=30)
 IDLE_TIMEOUT_MIN = 15
 DB_PATH = "database.db"
-ALLOWED_EXTS = {"pdf"}
+ALLOWED_EXTS = {"pdf", "docx"}
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 
 
@@ -51,7 +100,6 @@ def current_user():
 
 
 def login_required(fn):
-    from functools import wraps
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -64,14 +112,13 @@ def login_required(fn):
 
 
 def admin_required(fn):
-    from functools import wraps
-
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        user = current_user()
-        if not user or not user["is_admin"]:
+        u = current_user()
+        if not (u and u.get("is_admin")):
             flash("Admin access required.", "error")
-            return redirect(url_for("login"))
+            # optional: send them back to where they tried to go
+            return redirect(url_for("login", next=request.path))
         return fn(*args, **kwargs)
 
     return wrapper
@@ -137,14 +184,21 @@ def login():
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute(
-            "SELECT id, password_hash, is_admin FROM users WHERE username=?",
+            "SELECT id, password_hash, is_admin, active FROM users WHERE username=?",
             (username,),
         )
         row = c.fetchone()
         conn.close()
 
         if not row or not check_password_hash(row[1], password):
+            import time
+
+            time.sleep(0.5)
             flash("Invalid username or password.", "error")
+            return redirect(url_for("login", next=next_url))
+
+        if not row[3]:
+            flash("Account is deactivated. Contact admin.", "error")
             return redirect(url_for("login", next=next_url))
 
         session.clear()
@@ -254,143 +308,84 @@ def admin_candidates():
 def admin_delete_candidate(cand_id: int):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+    c.execute("SELECT filepath FROM candidates WHERE id=?", (cand_id,))
+    row = c.fetchone()
+    if row and row[0] and os.path.exists(row[0]):
+        try:
+            os.remove(row[0])
+        except Exception:
+            pass
     c.execute("DELETE FROM candidates WHERE id=?", (cand_id,))
     conn.commit()
     conn.close()
-    flash(f"Candidate #{cand_id} deleted.", "success")
-    return redirect(url_for("admin_candidates"))
 
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS candidates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,                     -- full display name
-            first_name TEXT,
-            middle_name TEXT,
-            last_name TEXT,
-            phone TEXT,
-            email TEXT,
-            links TEXT,                    -- JSON array of strings
-            education TEXT,                -- JSON
-            experience TEXT,               -- JSON
-            projects TEXT,                 -- JSON
-            skills TEXT,                   -- CSV
-            languages TEXT,                -- CSV
-            raw_text TEXT
-        )"""
-    )
-    # users table
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            is_admin INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL
-        )"""
-    )
-    # password reset tokens
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS reset_tokens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            token TEXT UNIQUE NOT NULL,
-            expires_at TEXT NOT NULL,
-            used INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        )"""
-    )
-    conn.commit()
-    # Seed a default admin once (username: admin, password: 123)
-    c.execute("SELECT 1 FROM users WHERE username='admin'")
-    if not c.fetchone():
-        from datetime import datetime
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.executescript(SCHEMA_SQL)
+        c = conn.cursor()
+
+        # ensure an admin user called 'admin' exists AND is admin+active
+        from datetime import datetime, timezone
         from werkzeug.security import generate_password_hash
 
-        c.execute(
-            "INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?,?,?,?)",
-            (
-                "admin",
-                generate_password_hash("123"),
-                1,
-                datetime.utcnow().isoformat(),
-            ),
-        )
+        c.execute("SELECT id, is_admin, active FROM users WHERE username=?", ("admin",))
+        row = c.fetchone()
+        if not row:
+            c.execute(
+                """
+                INSERT INTO users (username, password_hash, is_admin, active, created_at)
+                VALUES (?,?,?,?,?)
+                """,
+                (
+                    "admin",
+                    generate_password_hash("123"),
+                    1,
+                    1,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+        else:
+            # elevate if needed
+            c.execute(
+                "UPDATE users SET is_admin=1, active=1 WHERE username=?", ("admin",)
+            )
         conn.commit()
-    conn.close()
 
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET"])
 @login_required
 def index():
-    if request.method == "POST":
-        f = request.files.get("resume")
-        if not (f and allowed_file(f.filename)):
-            return render_template("index.html", candidates=[], json=json)
-
-        os.makedirs("uploads", exist_ok=True)
-        safe = secure_filename(f.filename) or "resume.pdf"
-        uid = uuid.uuid4().hex
-        path = os.path.join("uploads", f"{uid}_{safe}")
-        f.save(path)
-
-        # Optional lightweight MIME check (pip-only; no libmagic)
-        if filetype:
-            kind = filetype.guess(path)
-            if not (kind and kind.mime == "application/pdf"):
-                try:
-                    os.remove(path)
-                except Exception:
-                    pass
-                return render_template("index.html", candidates=[], json=json)
-
-        parsed = parse_resume(path)
-
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute(
-            """INSERT INTO candidates
-            (name, first_name, middle_name, last_name, phone, email, links,
-                education, experience, skills, languages, raw_text)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                parsed.get("name", ""),
-                parsed.get("first_name", ""),
-                parsed.get("middle_name", ""),
-                parsed.get("last_name", ""),
-                parsed.get("phone", ""),
-                parsed.get("email", ""),
-                json.dumps(parsed.get("links", []), ensure_ascii=False),
-                json.dumps(parsed.get("education", []), ensure_ascii=False),
-                json.dumps(parsed.get("experience", []), ensure_ascii=False),
-                parsed.get("skills", ""),
-                parsed.get("languages", ""),
-                parsed.get("raw_text", ""),
-            ),
-        )
-
-        conn.commit()
-        conn.close()
-
-    # fetch list
+    # fetch list (OPTIONAL: show only the current user's CVs)
+    uid = current_user()["id"]
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute(
-        "SELECT id, name, first_name, middle_name, last_name, phone, email, links, "
-        "education, experience, skills, languages "
-        "FROM candidates ORDER BY id DESC"
+        """
+        SELECT id, name, first_name, middle_name, last_name, phone, email, links,
+               education, experience, skills, languages
+        FROM candidates
+        WHERE user_id=?
+        ORDER BY id DESC
+    """,
+        (uid,),
     )
     rows = c.fetchall()
     conn.close()
-    return render_template("index.html", candidates=rows, json=json)
+    return render_template("index.html", candidates=rows, json=json, user=current_user())
 
 
 @app.post("/update/<int:cand_id>")
 @login_required
 def update_candidate(cand_id: int):
+    uid = current_user()["id"]
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT user_id FROM candidates WHERE id=?", (cand_id,))
+        row = c.fetchone()
+        if not row or row[0] != uid:
+            abort(403)
+
     payload = request.get_json(force=True, silent=True) or {}
     name = payload.get("name", "")
     first_name = payload.get("first_name", "")
@@ -440,7 +435,7 @@ def admin_cvs():
     files = [
         (f, os.path.getmtime(os.path.join(base, f)))
         for f in os.listdir(base)
-        if f.lower().endswith(".pdf")
+        if f.lower().endswith((".pdf", ".docx"))
     ]
     files.sort(key=lambda x: x[1], reverse=True)
     files = [f for f, _ in files]
@@ -471,10 +466,305 @@ def admin_cvs():
     return render_template("admin_cvs.html", items=items)
 
 
+@app.post("/upload")
+@login_required
+def upload():
+    f = request.files.get("file")
+    if not f:
+        flash("No file")
+        return redirect(url_for("index"))
+
+    # extension guard
+    ext = os.path.splitext(f.filename)[1].lower().lstrip(".")
+    if ext not in ALLOWED_EXTS:
+        flash("Unsupported file type")
+        return redirect(url_for("index"))
+
+    # save file: uploads/<userId>_<safe_name>
+    uid = current_user()["id"]
+    safe_name = secure_filename(f.filename)
+    save_dir = os.path.join(app.root_path, "uploads")
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, f"{uid}_{safe_name}")
+    f.save(save_path)
+
+    # parse resume
+    try:
+        parsed = parse_resume(save_path)
+    except Exception as e:
+        # cleanup on failure
+        try:
+            os.remove(save_path)
+        except Exception:
+            pass
+        flash(f"Parse failed: {e}")
+        return redirect(url_for("index"))
+
+    # --- normalize fields for DB ---
+    links_json = json.dumps(parsed.get("links", []), ensure_ascii=False)
+    education_json = json.dumps(parsed.get("education", []), ensure_ascii=False)
+    experience_json = json.dumps(parsed.get("experience", []), ensure_ascii=False)
+
+    skills_val = parsed.get("skills", "")
+    if isinstance(skills_val, list):
+        skills_val = ", ".join(map(str, skills_val))
+
+    # you said you don't need to parse languages
+    languages_val = ""  # store empty; no list/JSON here
+
+    raw_text_val = parsed.get("raw_text", "")
+    now = datetime.now(timezone.utc).isoformat()
+
+    # insert
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute(
+            """
+            INSERT INTO candidates (
+              user_id, name, first_name, middle_name, last_name,
+              phone, email, links, education, experience,
+              skills, languages, raw_text, filepath, created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                uid,
+                parsed.get("name", ""),
+                parsed.get("first_name", ""),
+                parsed.get("middle_name", ""),
+                parsed.get("last_name", ""),
+                parsed.get("phone", ""),
+                parsed.get("email", ""),
+                links_json,
+                education_json,
+                experience_json,
+                skills_val,
+                languages_val,
+                raw_text_val,
+                save_path,
+                now,
+            ),
+        )
+        conn.commit()
+
+    flash("CV uploaded")
+    return redirect(url_for("index"))
+
+
+def get_upload_counts():
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        rows = c.execute(
+            """
+            SELECT u.id, u.username, u.active, u.is_admin, COUNT(c.id) AS uploads
+            FROM users u
+            LEFT JOIN candidates c ON c.user_id = u.id
+            GROUP BY u.id, u.username, u.active, u.is_admin
+            ORDER BY uploads DESC, u.username ASC
+            """
+        ).fetchall()
+    return rows
+
+
+@app.post("/reupload/<int:cand_id>")
+@login_required
+def reupload_cv(cand_id: int):
+    uid = current_user()["id"]
+    f = request.files.get("file")
+    if not f:
+        flash("No file to re-upload.", "error")
+        return redirect(url_for("index"))
+
+    ext = os.path.splitext(f.filename)[1].lower().lstrip(".")
+    if ext not in {"pdf", "docx"}:
+        flash("Unsupported file type", "error")
+        return redirect(url_for("index"))
+
+    # owner/admin check + get old filepath
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT user_id, filepath FROM candidates WHERE id=?", (cand_id,))
+        row = c.fetchone()
+        if not row:
+            flash("Candidate not found.", "error")
+            return redirect(url_for("index"))
+        owner_id, old_path = row
+        u = current_user()
+        if not (u["is_admin"] or owner_id == uid):
+            abort(403)
+
+    # save new file
+    safe_name = secure_filename(f.filename)
+    save_dir = os.path.join(app.root_path, "uploads")
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, f"{uid}_{safe_name}")
+    f.save(save_path)
+
+    # parse
+    try:
+        parsed = parse_resume(save_path)
+    except Exception as e:
+        try:
+            os.remove(save_path)
+        except Exception:
+            pass
+        flash(f"Parse failed: {e}", "error")
+        return redirect(url_for("index"))
+
+    # --- normalize fields for DB ---
+    links_json = json.dumps(parsed.get("links", []), ensure_ascii=False)
+    education_json = json.dumps(parsed.get("education", []), ensure_ascii=False)
+    experience_json = json.dumps(parsed.get("experience", []), ensure_ascii=False)
+
+    skills_val = parsed.get("skills", "")
+    if isinstance(skills_val, list):
+        skills_val = ", ".join(map(str, skills_val))
+
+    # you said you don't need to parse languages
+    languages_val = ""  # store empty; no list/JSON here
+
+    raw_text_val = parsed.get("raw_text", "")
+    now = datetime.now(timezone.utc).isoformat()
+
+    # update candidate
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute(
+            """
+            UPDATE candidates SET
+              name=?, first_name=?, middle_name=?, last_name=?,
+              phone=?, email=?, links=?, education=?, experience=?,
+              skills=?, languages=?, raw_text=?, filepath=?, created_at=?
+            WHERE id=?
+            """,
+            (
+                parsed.get("name", ""),
+                parsed.get("first_name", ""),
+                parsed.get("middle_name", ""),
+                parsed.get("last_name", ""),
+                parsed.get("phone", ""),
+                parsed.get("email", ""),
+                links_json,
+                education_json,
+                experience_json,
+                skills_val,
+                languages_val,
+                raw_text_val,
+                save_path,
+                now,
+                cand_id,
+            ),
+        )
+        conn.commit()
+
+    # remove old file after successful update
+    if old_path and os.path.exists(old_path):
+        try:
+            os.remove(old_path)
+        except Exception:
+            pass
+
+    flash("CV re-uploaded & parsed.", "success")
+    return redirect(url_for("index"))
+
+
+@app.post("/account/delete")
+@login_required
+def account_delete():
+    uid = current_user()["id"]
+    pw = request.form.get("password") or ""
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT password_hash FROM users WHERE id=?", (uid,))
+        row = c.fetchone()
+        if not row or not check_password_hash(row[0], pw):
+            flash("Password incorrect.", "error")
+            return redirect(url_for("index"))
+        c.execute("SELECT filepath FROM candidates WHERE user_id=?", (uid,))
+        for (fp,) in c.fetchall():
+            if fp and os.path.exists(fp):
+                try:
+                    os.remove(fp)
+                except Exception:
+                    pass
+        c.execute("DELETE FROM users WHERE id=?", (uid,))
+        conn.commit()
+    session.clear()
+    flash("Account and all uploads deleted.", "success")
+    return redirect(url_for("login"))
+
+
+@app.post("/cv/delete/<int:cand_id>")
+@login_required
+def delete_cv(cand_id: int):
+    uid = current_user()["id"]
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT user_id, filepath FROM candidates WHERE id=?", (cand_id,))
+        row = c.fetchone()
+        if not row:
+            flash("Not found.", "error")
+            return redirect(url_for("index"))
+        owner_id, fpath = row
+        u = current_user()
+        if not (u["is_admin"] or owner_id == uid):
+            abort(403)
+        if fpath and os.path.exists(fpath):
+            try:
+                os.remove(fpath)
+            except Exception:
+                pass
+        c.execute("DELETE FROM candidates WHERE id=?", (cand_id,))
+        conn.commit()
+    flash(f"Deleted CV #{cand_id}.", "success")
+    return redirect(url_for("index"))
+
+
+@app.get("/admin/users")
+@admin_required
+def admin_users():
+    rows = get_upload_counts()
+    return render_template("admin_users.html", rows=rows)
+
+
 @app.route("/admin/cvs/<path:filename>")
 @admin_required
 def admin_download_cv(filename):
     return send_from_directory("uploads", filename, as_attachment=True)
+
+
+@app.post("/admin/users/<int:uid>/deactivate")
+@admin_required
+def deactivate_user(uid: int):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("UPDATE users SET active=0 WHERE id=?", (uid,))
+        conn.commit()
+    flash(f"User #{uid} deactivated.", "success")
+    return redirect(url_for("admin_users"))
+
+
+@app.post("/admin/users/<int:uid>/activate")
+@admin_required
+def activate_user(uid: int):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("UPDATE users SET active=1 WHERE id=?", (uid,))
+        conn.commit()
+    flash(f"User #{uid} activated.", "success")
+    return redirect(url_for("admin_users"))
+
+
+@app.post("/admin/users/<int:uid>/reset")
+@admin_required
+def admin_reset_user(uid: int):
+    token = secrets.token_urlsafe(24)
+    expires = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO reset_tokens (user_id, token, expires_at) VALUES (?,?,?)",
+            (uid, token, expires),
+        )
+        conn.commit()
+    flash(f"Reset link: {url_for('reset_form', token=token, _external=False)}", "info")
+    return redirect(url_for("admin_users"))
 
 
 if __name__ == "__main__":
