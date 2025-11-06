@@ -77,8 +77,9 @@ app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 app.permanent_session_lifetime = timedelta(minutes=30)
 IDLE_TIMEOUT_MIN = 15
 DB_PATH = os.environ.get("DB_PATH", "database.db")
-UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(app.root_path, "uploads"))
+UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
 ALLOWED_EXTS = {"pdf", "docx"}
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 
 
@@ -595,7 +596,7 @@ def reupload_cv(cand_id: int):
 
     # save new file
     safe_name = secure_filename(f.filename)
-    save_dir = os.path.join(app.root_path, "uploads")
+    save_dir =  UPLOAD_DIR
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, f"{uid}_{safe_name}")
     f.save(save_path)
