@@ -76,7 +76,8 @@ app.config.update(
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 app.permanent_session_lifetime = timedelta(minutes=30)
 IDLE_TIMEOUT_MIN = 15
-DB_PATH = "database.db"
+DB_PATH = os.environ.get("DB_PATH", "database.db")
+UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(app.root_path, "uploads"))
 ALLOWED_EXTS = {"pdf", "docx"}
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 
@@ -483,7 +484,7 @@ def upload():
     # save file: uploads/<userId>_<safe_name>
     uid = current_user()["id"]
     safe_name = secure_filename(f.filename)
-    save_dir = os.path.join(app.root_path, "uploads")
+    save_dir = UPLOAD_DIR
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, f"{uid}_{safe_name}")
     f.save(save_path)

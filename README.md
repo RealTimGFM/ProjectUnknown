@@ -46,5 +46,7 @@ del database.db
 # or
 rm database.db
 # start the app again so it recreates the table
-
 The admin credential is: admin|123
+
+# FINAL WORDS
+The app is currently a prototype for school project. In order to make this better, it will need a lot of data and training. Which cannot be done with the given time and the amount of subjects I have to do at school. 

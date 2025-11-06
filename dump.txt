@@ -2,9 +2,9 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-11-03T04:30:11Z
-Root: C:\Users\User\Documents\GitHub\ProjectUnknown
-Python: 3.13.5
+Generated: 2025-11-06T14:32:32Z
+Root: C:\Users\TimGFM\Documents\GitHub\ProjectUnknown
+Python: 3.7.9
 
 ================================================================================
 PROJECT TREE
@@ -33,18 +33,16 @@ ProjectUnknown/
 │   ├── auth_signup.html
 │   └── index.html
 ├── uploads/
-│   └── 2_QuyVuLuong_CV.pdf
 ├── .gitattributes
 ├── .gitignore
 ├── backend.py
-├── database.db
 ├── dump.txt
 ├── dump_project.py
 ├── README.md
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 3  Files: 29
+Directories: 3  Files: 27
 
 ================================================================================
 FILE CONTENTS
@@ -87,10 +85,9 @@ ProjectUnknown/
 ## Quickstart
 ```
 
-> Tested on **Python 3.13**. Works on 3.10+.
-
 ### 1) Create venv & install deps
 **Windows (PowerShell):**
+Please use Python 3.11+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -99,11 +96,12 @@ pip install -r requirements.txt
 python backend.py
 http://127.0.0.1:5000
 # stop the app, then:
-del database.db         # PowerShell
+del database.db
 # or
-rm database.db          # bash/zsh
+rm database.db
 # start the app again so it recreates the table
 
+The admin credential is: admin|123
 
 ================================================================================
 // Path: backend.py
@@ -891,9 +889,9 @@ if __name__ == "__main__":
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-11-03T04:30:11Z
-Root: C:\Users\User\Documents\GitHub\ProjectUnknown
-Python: 3.13.5
+Generated: 2025-11-06T14:32:32Z
+Root: C:\Users\TimGFM\Documents\GitHub\ProjectUnknown
+Python: 3.7.9
 
 ================================================================================
 PROJECT TREE
@@ -922,18 +920,16 @@ ProjectUnknown/
 │   ├── auth_signup.html
 │   └── index.html
 ├── uploads/
-│   └── 2_QuyVuLuong_CV.pdf
 ├── .gitattributes
 ├── .gitignore
 ├── backend.py
-├── database.db
 ├── dump.txt
 ├── dump_project.py
 ├── README.md
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 3  Files: 29
+Directories: 3  Files: 27
 
 ================================================================================
 FILE CONTENTS
@@ -976,10 +972,9 @@ ProjectUnknown/
 ## Quickstart
 ```
 
-> Tested on **Python 3.13**. Works on 3.10+.
-
 ### 1) Create venv & install deps
 **Windows (PowerShell):**
+Please use Python 3.11+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -988,11 +983,12 @@ pip install -r requirements.txt
 python backend.py
 http://127.0.0.1:5000
 # stop the app, then:
-del database.db         # PowerShell
+del database.db
 # or
-rm database.db          # bash/zsh
+rm database.db
 # start the app again so it recreates the table
 
+The admin credential is: admin|123
 
 ================================================================================
 // Path: backend.py
@@ -4536,10 +4532,14 @@ def split_sections(text: str) -> dict[str, list[str]]:
             <button class="btn" type="submit">Re-upload</button>
           </form>
 
-          <!-- Clear inputs in this card (front-end only) -->
+          <!-- Clear inputs in this card (front-end only) 
           <button type="button" class="btn" onclick="clearCard('{{ cid }}')">
             Clear this card
           </button>
+          <button type="button" class="btn" onclick="clearAllDescriptions('{{ cid }}')">
+            Clear all Role Descriptions
+          </button>
+          -->
         </div>
       </div>
 
@@ -4611,7 +4611,12 @@ def split_sections(text: str) -> dict[str, list[str]]:
             <input id="exp-{{cid}}-{{loop.index0}}-duration_months" value="{{ e.get('duration_months','') }}">
           </div>
           <div class="col-12">
-            <label>Role Description</label>
+            <div class="row" style="justify-content:space-between; align-items:center">
+              <label style="margin:0">Role Description</label>
+              <button type="button" class="btn" onclick="clearField('exp-{{cid}}-{{loop.index0}}-description')">
+                Clear
+              </button>
+            </div>
             <textarea id="exp-{{cid}}-{{loop.index0}}-description">{{ e.get('description','') }}</textarea>
           </div>
         </div>
@@ -4655,9 +4660,15 @@ def split_sections(text: str) -> dict[str, list[str]]:
 
       <div class="grid section">
         <div class="col-12">
-          <label>Skills (technical; CSV)</label>
+          <div class="row" style="justify-content:space-between; align-items:center">
+            <label style="margin:0">Skills (technical; CSV)</label>
+            <button type="button" class="btn" onclick="clearField('skills-{{cid}}')">
+              Clear
+            </button>
+          </div>
           <textarea id="skills-{{cid}}">{{ skills }}</textarea>
         </div>
+
       </div>
 
     </div>
@@ -4753,6 +4764,23 @@ def split_sections(text: str) -> dict[str, list[str]]:
       };
     }
 
+    function clearField(id) {
+      const el = document.getElementById(id);
+      if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')) {
+        el.value = '';
+        el.dispatchEvent(new Event('input'));
+      }
+    }
+
+    function clearAllDescriptions(cid) {
+      document
+        .querySelectorAll(`#card-${cid} textarea[id^="exp-${cid}-"][id$="-description"]`)
+        .forEach(t => {
+          t.value = '';
+          t.dispatchEvent(new Event('input'));
+        });
+    }
+
     async function saveAllCandidates() {
       const btn = document.getElementById('save-all');
       if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
@@ -4787,4 +4815,4 @@ def split_sections(text: str) -> dict[str, list[str]]:
 </html>
 
 
-// Summary: wrote 25 files, skipped 55674 files.
+// Summary: wrote 25 files, skipped 38776 files.
