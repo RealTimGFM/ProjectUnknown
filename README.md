@@ -46,3 +46,5 @@ del database.db
 # or
 rm database.db
 # start the app again so it recreates the table
+
+The admin credential is: admin|123
