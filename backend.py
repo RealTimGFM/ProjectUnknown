@@ -76,7 +76,8 @@ app.config.update(
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 app.permanent_session_lifetime = timedelta(minutes=30)
 IDLE_TIMEOUT_MIN = 15
-DB_PATH = os.environ.get("DB_PATH", "database.db")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
+DB_PATH  = os.environ.get("DB_PATH", os.path.join(BASE_DIR, "database.db"))
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
 ALLOWED_EXTS = {"pdf", "docx"}
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -430,7 +431,7 @@ def update_candidate(cand_id: int):
 @app.route("/admin/cvs")
 @admin_required
 def admin_cvs():
-    base = "uploads"
+    base = UPLOAD_DIR
     os.makedirs(base, exist_ok=True)
 
     # 1) get files, newest first
@@ -731,7 +732,7 @@ def admin_users():
 @app.route("/admin/cvs/<path:filename>")
 @admin_required
 def admin_download_cv(filename):
-    return send_from_directory("uploads", filename, as_attachment=True)
+    return send_from_directory(UPLOAD_DIR, filename, as_attachment=True)
 
 
 @app.post("/admin/users/<int:uid>/deactivate")
@@ -768,7 +769,7 @@ def admin_reset_user(uid: int):
     flash(f"Reset link: {url_for('reset_form', token=token, _external=False)}", "info")
     return redirect(url_for("admin_users"))
 
-
+init_db()
 if __name__ == "__main__":
-    init_db()
+
     app.run(debug=False)
