@@ -31,10 +31,9 @@ ProjectUnknown/
 ## Quickstart
 ```
 
-> Tested on **Python 3.13**. Works on 3.10+.
-
 ### 1) Create venv & install deps
 **Windows (PowerShell):**
+Please use Python 3.11+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -43,7 +42,7 @@ pip install -r requirements.txt
 python backend.py
 http://127.0.0.1:5000
 # stop the app, then:
-del database.db         # PowerShell
+del database.db
 # or
-rm database.db          # bash/zsh
+rm database.db
 # start the app again so it recreates the table
