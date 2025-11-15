@@ -2,9 +2,9 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-11-06T14:32:32Z
-Root: C:\Users\TimGFM\Documents\GitHub\ProjectUnknown
-Python: 3.7.9
+Generated: 2025-11-15T03:43:22Z
+Root: C:\Users\User\Documents\GitHub\ProjectUnknown
+Python: 3.13.5
 
 ================================================================================
 PROJECT TREE
@@ -36,13 +36,15 @@ ProjectUnknown/
 ├── .gitattributes
 ├── .gitignore
 ├── backend.py
+├── database.db
 ├── dump.txt
 ├── dump_project.py
+├── Procfile
 ├── README.md
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 3  Files: 27
+Directories: 3  Files: 29
 
 ================================================================================
 FILE CONTENTS
@@ -100,8 +102,10 @@ del database.db
 # or
 rm database.db
 # start the app again so it recreates the table
-
 The admin credential is: admin|123
+
+# FINAL WORDS
+The app is currently a prototype for school project. In order to make this better, it will need a lot of data and training. Which cannot be done with the given time and the amount of subjects I have to do at school. 
 
 ================================================================================
 // Path: backend.py
@@ -185,8 +189,11 @@ app.config.update(
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 app.permanent_session_lifetime = timedelta(minutes=30)
 IDLE_TIMEOUT_MIN = 15
-DB_PATH = "database.db"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
+DB_PATH  = os.environ.get("DB_PATH", os.path.join(BASE_DIR, "database.db"))
+UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
 ALLOWED_EXTS = {"pdf", "docx"}
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 
 
@@ -537,7 +544,7 @@ def update_candidate(cand_id: int):
 @app.route("/admin/cvs")
 @admin_required
 def admin_cvs():
-    base = "uploads"
+    base = UPLOAD_DIR
     os.makedirs(base, exist_ok=True)
 
     # 1) get files, newest first
@@ -592,7 +599,7 @@ def upload():
     # save file: uploads/<userId>_<safe_name>
     uid = current_user()["id"]
     safe_name = secure_filename(f.filename)
-    save_dir = os.path.join(app.root_path, "uploads")
+    save_dir = UPLOAD_DIR
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, f"{uid}_{safe_name}")
     f.save(save_path)
@@ -703,7 +710,7 @@ def reupload_cv(cand_id: int):
 
     # save new file
     safe_name = secure_filename(f.filename)
-    save_dir = os.path.join(app.root_path, "uploads")
+    save_dir =  UPLOAD_DIR
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, f"{uid}_{safe_name}")
     f.save(save_path)
@@ -838,7 +845,7 @@ def admin_users():
 @app.route("/admin/cvs/<path:filename>")
 @admin_required
 def admin_download_cv(filename):
-    return send_from_directory("uploads", filename, as_attachment=True)
+    return send_from_directory(UPLOAD_DIR, filename, as_attachment=True)
 
 
 @app.post("/admin/users/<int:uid>/deactivate")
@@ -875,9 +882,9 @@ def admin_reset_user(uid: int):
     flash(f"Reset link: {url_for('reset_form', token=token, _external=False)}", "info")
     return redirect(url_for("admin_users"))
 
-
+init_db()
 if __name__ == "__main__":
-    init_db()
+
     app.run(debug=False)
 
 
@@ -889,9 +896,9 @@ if __name__ == "__main__":
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-11-06T14:32:32Z
-Root: C:\Users\TimGFM\Documents\GitHub\ProjectUnknown
-Python: 3.7.9
+Generated: 2025-11-15T03:43:22Z
+Root: C:\Users\User\Documents\GitHub\ProjectUnknown
+Python: 3.13.5
 
 ================================================================================
 PROJECT TREE
@@ -923,13 +930,15 @@ ProjectUnknown/
 ├── .gitattributes
 ├── .gitignore
 ├── backend.py
+├── database.db
 ├── dump.txt
 ├── dump_project.py
+├── Procfile
 ├── README.md
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 3  Files: 27
+Directories: 3  Files: 29
 
 ================================================================================
 FILE CONTENTS
@@ -987,8 +996,10 @@ del database.db
 # or
 rm database.db
 # start the app again so it recreates the table
-
 The admin credential is: admin|123
+
+# FINAL WORDS
+The app is currently a prototype for school project. In order to make this better, it will need a lot of data and training. Which cannot be done with the given time and the amount of subjects I have to do at school. 
 
 ================================================================================
 // Path: backend.py
@@ -1072,8 +1083,11 @@ app.config.update(
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 app.permanent_session_lifetime = timedelta(minutes=30)
 IDLE_TIMEOUT_MIN = 15
-DB_PATH = "database.db"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
+DB_PATH  = os.environ.get("DB_PATH", os.path.join(BASE_DIR, "database.db"))
+UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
 ALLOWED_EXTS = {"pdf", "docx"}
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 
 
@@ -1424,7 +1438,7 @@ def update_candidate(cand_id: int):
 @app.route("/admin/cvs")
 @admin_required
 def admin_cvs():
-    base = "uploads"
+    base = UPLOAD_DIR
     os.makedirs(base, exist_ok=True)
 
     # 1) get files, newest first
@@ -1479,7 +1493,7 @@ def upload():
     # save file: uploads/<userId>_<safe_name>
     uid = current_user()["id"]
     safe_name = secure_filename(f.filename)
-    save_dir = os.path.join(app.root_path, "uploads")
+    save_dir = UPLOAD_DIR
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, f"{uid}_{safe_name}")
     f.save(save_path)
@@ -1590,7 +1604,7 @@ def reupload_cv(cand_id: int):
 
     # save new file
     safe_name = secure_filename(f.filename)
-    save_dir = os.path.join(app.root_path, "uploads")
+    save_dir =  UPLOAD_DIR
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, f"{uid}_{safe_name}")
     f.save(save_path)
@@ -1725,7 +1739,7 @@ def admin_users():
 @app.route("/admin/cvs/<path:filename>")
 @admin_required
 def admin_download_cv(filename):
-    return send_from_directory("uploads", filename, as_attachment=True)
+    return send_from_directory(UPLOAD_DIR, filename, as_attachment=True)
 
 
 @app.post("/admin/users/<int:uid>/deactivate")
@@ -1762,9 +1776,9 @@ def admin_reset_user(uid: int):
     flash(f"Reset link: {url_for('reset_form', token=token, _external=False)}", "info")
     return redirect(url_for("admin_users"))
 
-
+init_db()
 if __name__ == "__main__":
-    init_db()
+
     app.run(debug=False)
 
 
@@ -2044,6 +2058,7 @@ Werkzeug>=3.0.3
 Jinja2>=3.1.4
 itsdangerous>=2.2.0
 click>=8.1.7
+gunicorn
 
 # --- PDF parsing (pip-only) ---
 PyMuPDF>=1.24
@@ -4815,4 +4830,4 @@ def split_sections(text: str) -> dict[str, list[str]]:
 </html>
 
 
-// Summary: wrote 25 files, skipped 38776 files.
+// Summary: wrote 25 files, skipped 55706 files.

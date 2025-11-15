@@ -769,6 +769,10 @@ def admin_reset_user(uid: int):
     flash(f"Reset link: {url_for('reset_form', token=token, _external=False)}", "info")
     return redirect(url_for("admin_users"))
 
+@app.get("/healthz")
+def healthz():
+    return "ok", 200
+
 init_db()
 if __name__ == "__main__":
 
