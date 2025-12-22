@@ -3,3 +3,4 @@ dump.txt
 .venv
 *cache*
 database.db
+dump.txt
