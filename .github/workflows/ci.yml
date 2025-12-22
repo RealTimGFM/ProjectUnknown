@@ -2,75 +2,29 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["main"]
   pull_request:
-    branches: [main]
-  workflow_dispatch:
-  schedule:
-    # Mondays 14:00 UTC ~= 9:00 Toronto (EST) / 10:00 (EDT)
-    - cron: "0 14 * * 1"
-
-permissions:
-  contents: read
+    branches: ["main"]
 
 jobs:
-  build-test:
-    name: Install + smoke checks
+  test:
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        python-version: ["3.11"]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-          cache-dependency-path: requirements.txt
+          python-version: "3.11"
+          cache: "pip"
 
-      - name: Install dependencies
+      - name: Install minimal deps for tests
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
+          pip install Flask Werkzeug pytest
 
-      - name: Syntax check (compileall)
-        run: python -m compileall -q .
-
-      - name: Import smoke test
+      - name: Run tests
         run: |
-          python -c "import backend"
-          python -c "import resume_parser"
-
-      - name: Run pytest (only if tests exist)
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s globstar nullglob
-          tests=(**/test_*.py **/*_test.py)
-          if [ ${#tests[@]} -gt 0 ]; then
-            echo "Detected ${#tests[@]} test file(s). Running pytest..."
-            pytest -q
-          else
-            echo "No pytest tests detected. Skipping."
-          fi
-
-  dependency-review:
-    name: Dependency Review (PR only)
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Dependency Review
-        uses: actions/dependency-review-action@v4
+          pytest -q

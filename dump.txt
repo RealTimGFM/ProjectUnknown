@@ -2,7 +2,7 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-11-15T03:43:22Z
+Generated: 2025-12-22T20:57:32Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -11,6 +11,10 @@ PROJECT TREE
 ================================================================================
 
 ProjectUnknown/
+├── .github/
+│   └── workflows/
+│       ├── ci.yml
+│       └── deploy-render.yml
 ├── ats_parser/
 │   ├── __init__.py
 │   ├── ingest.py
@@ -32,6 +36,8 @@ ProjectUnknown/
 │   ├── auth_reset_set.html
 │   ├── auth_signup.html
 │   └── index.html
+├── tests/
+│   └── test_smoke.py
 ├── uploads/
 ├── .gitattributes
 ├── .gitignore
@@ -44,7 +50,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 3  Files: 29
+Directories: 6  Files: 32
 
 ================================================================================
 FILE CONTENTS
@@ -881,6 +887,10 @@ def admin_reset_user(uid: int):
         conn.commit()
     flash(f"Reset link: {url_for('reset_form', token=token, _external=False)}", "info")
     return redirect(url_for("admin_users"))
+
+@app.get("/healthz")
+def healthz():
+    return "ok", 200
 
 init_db()
 if __name__ == "__main__":
@@ -896,7 +906,7 @@ if __name__ == "__main__":
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-11-15T03:43:22Z
+Generated: 2025-12-22T20:57:32Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -905,6 +915,10 @@ PROJECT TREE
 ================================================================================
 
 ProjectUnknown/
+├── .github/
+│   └── workflows/
+│       ├── ci.yml
+│       └── deploy-render.yml
 ├── ats_parser/
 │   ├── __init__.py
 │   ├── ingest.py
@@ -926,6 +940,8 @@ ProjectUnknown/
 │   ├── auth_reset_set.html
 │   ├── auth_signup.html
 │   └── index.html
+├── tests/
+│   └── test_smoke.py
 ├── uploads/
 ├── .gitattributes
 ├── .gitignore
@@ -938,7 +954,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 3  Files: 29
+Directories: 6  Files: 32
 
 ================================================================================
 FILE CONTENTS
@@ -1775,6 +1791,10 @@ def admin_reset_user(uid: int):
         conn.commit()
     flash(f"Reset link: {url_for('reset_form', token=token, _external=False)}", "info")
     return redirect(url_for("admin_users"))
+
+@app.get("/healthz")
+def healthz():
+    return "ok", 200
 
 init_db()
 if __name__ == "__main__":
@@ -2059,6 +2079,7 @@ Jinja2>=3.1.4
 itsdangerous>=2.2.0
 click>=8.1.7
 gunicorn
+pytest
 
 # --- PDF parsing (pip-only) ---
 PyMuPDF>=1.24
@@ -2176,6 +2197,74 @@ def parse_resume(filepath: str) -> Dict:
                 "projects": projects,
             }
     raise ValueError(f"Unsupported file type: {ext}")
+
+
+================================================================================
+// Path: .github/workflows/ci.yml
+================================================================================
+
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install minimal deps for tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install Flask Werkzeug pytest
+
+      - name: Run tests
+        run: |
+          pytest -q
+
+
+================================================================================
+// Path: .github/workflows/deploy-render.yml
+================================================================================
+
+name: Deploy to Render
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy hook
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "${RENDER_DEPLOY_HOOK_URL:-}" ]; then
+            echo "Missing secret: RENDER_DEPLOY_HOOK_URL"
+            echo "Add it in GitHub: Settings -> Secrets and variables -> Actions"
+            exit 1
+          fi
+
+          curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL"
+          echo "Render deploy triggered."
 
 
 ================================================================================
@@ -4829,5 +4918,100 @@ def split_sections(text: str) -> dict[str, list[str]]:
 
 </html>
 
+================================================================================
+// Path: tests/test_smoke.py
+================================================================================
 
-// Summary: wrote 25 files, skipped 55706 files.
+# tests/test_smoke.py
+import importlib
+import sys
+import types
+
+import pytest
+
+
+def _import_fresh(module_name: str):
+    """Import a module after removing it from sys.modules (so env vars apply)."""
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    return importlib.import_module(module_name)
+
+
+def _install_dummy_ats_parser():
+    """
+    Provide a tiny in-memory ats_parser so tests don't need the real heavy parser stack.
+    resume_parser imports: parse_file, adapt_for_backend.
+    """
+    dummy = types.ModuleType("ats_parser")
+    calls = {"parse_file": 0, "adapt_for_backend": 0}
+
+    def parse_file(path: str):
+        calls["parse_file"] += 1
+        # Minimal shape; resume_parser will pass this into adapt_for_backend()
+        return {"raw_text": "hello from pdf", "skills": ["Python"]}
+
+    def adapt_for_backend(res: dict):
+        calls["adapt_for_backend"] += 1
+        # Match the backend's expected keys (safe defaults)
+        return {
+            "raw_text": res.get("raw_text", ""),
+            "name": "Test User",
+            "first_name": "Test",
+            "middle_name": "",
+            "last_name": "User",
+            "phone": "",
+            "email": "",
+            "links": [],
+            "skills": res.get("skills", ""),
+            "education": [],
+            "experience": [],
+            "languages": "",
+            "projects": "",
+        }
+
+    dummy.parse_file = parse_file
+    dummy.adapt_for_backend = adapt_for_backend
+    sys.modules["ats_parser"] = dummy
+    return calls
+
+
+def test_parse_resume_pdf_calls_parse_pipeline(tmp_path):
+    calls = _install_dummy_ats_parser()
+
+    resume_parser = _import_fresh("resume_parser")
+
+    out = resume_parser.parse_resume(str(tmp_path / "x.pdf"))
+
+    assert calls["parse_file"] == 1
+    assert calls["adapt_for_backend"] == 1
+    assert out["raw_text"] == "hello from pdf"
+    assert out["name"] == "Test User"
+
+
+def test_parse_resume_unsupported_extension_raises():
+    _install_dummy_ats_parser()
+    resume_parser = _import_fresh("resume_parser")
+
+    with pytest.raises(ValueError):
+        resume_parser.parse_resume("x.txt")
+
+
+def test_backend_allowed_file_and_init_db(tmp_path, monkeypatch):
+    # Make backend use temp paths; backend runs init_db() at import time.
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
+
+    _install_dummy_ats_parser()
+
+    backend = _import_fresh("backend")
+
+    assert backend.allowed_file("resume.pdf") is True
+    assert backend.allowed_file("resume.docx") is True
+    assert backend.allowed_file("resume.exe") is False
+
+    # backend.init_db() is called at module import, so DB should exist.
+    assert (tmp_path / "test.db").exists()
+
+
+
+// Summary: wrote 28 files, skipped 55995 files.
