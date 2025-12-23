@@ -1,0 +1,10 @@
+pytest
+Flask
+Werkzeug
+requests
+PyMuPDF
+phonenumbers
+dateparser
+rapidfuzz
+langdetect
+pydantic
