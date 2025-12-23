@@ -1,15 +1,25 @@
-name: Dependency Review (PR only)
+name: Deploy to Render
 
 on:
-  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
-  dependency-review:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/dependency-review-action@v4
+      - name: Trigger Render deploy hook (skip if secret missing)
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "${RENDER_DEPLOY_HOOK_URL:-}" ]; then
+            echo "Skipping deploy: missing secret RENDER_DEPLOY_HOOK_URL"
+            exit 0
+          fi
+
+          curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL"
+          echo "Render deploy triggered."

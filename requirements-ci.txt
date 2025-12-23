@@ -1,10 +1,21 @@
 pytest
 Flask
 Werkzeug
+
+# Imported by ats_parser/llm.py
 requests
+
+# Your pydantic models use EmailStr -> requires email-validator
+pydantic[email]
+
+# Imported by ats_parser/ingest.py as `fitz`
 PyMuPDF
+
+# Used by parsing rules/tests
 phonenumbers
 dateparser
 rapidfuzz
 langdetect
-pydantic
+filetype
+regex
+python-dateutil
