@@ -2,7 +2,7 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-12-22T20:57:32Z
+Generated: 2025-12-23T04:16:36Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -15,6 +15,14 @@ ProjectUnknown/
 │   └── workflows/
 │       ├── ci.yml
 │       └── deploy-render.yml
+├── .pytest_cache/
+│   ├── v/
+│   │   └── cache/
+│   │       ├── lastfailed
+│   │       └── nodeids
+│   ├── .gitignore
+│   ├── CACHEDIR.TAG
+│   └── README.md
 ├── ats_parser/
 │   ├── __init__.py
 │   ├── ingest.py
@@ -37,6 +45,16 @@ ProjectUnknown/
 │   ├── auth_signup.html
 │   └── index.html
 ├── tests/
+│   ├── conftest.py
+│   ├── test_contacts_extract.py
+│   ├── test_dates_parse.py
+│   ├── test_education_fallback.py
+│   ├── test_experience_fallback.py
+│   ├── test_parser_pipeline_contract.py
+│   ├── test_projects_contract.py
+│   ├── test_resume_parser_entrypoint.py
+│   ├── test_sections_split.py
+│   ├── test_skills_extract.py
 │   └── test_smoke.py
 ├── uploads/
 ├── .gitattributes
@@ -46,11 +64,12 @@ ProjectUnknown/
 ├── dump.txt
 ├── dump_project.py
 ├── Procfile
+├── pytest.ini
 ├── README.md
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 6  Files: 32
+Directories: 9  Files: 48
 
 ================================================================================
 FILE CONTENTS
@@ -906,7 +925,7 @@ if __name__ == "__main__":
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-12-22T20:57:32Z
+Generated: 2025-12-23T04:16:36Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -919,6 +938,14 @@ ProjectUnknown/
 │   └── workflows/
 │       ├── ci.yml
 │       └── deploy-render.yml
+├── .pytest_cache/
+│   ├── v/
+│   │   └── cache/
+│   │       ├── lastfailed
+│   │       └── nodeids
+│   ├── .gitignore
+│   ├── CACHEDIR.TAG
+│   └── README.md
 ├── ats_parser/
 │   ├── __init__.py
 │   ├── ingest.py
@@ -941,6 +968,16 @@ ProjectUnknown/
 │   ├── auth_signup.html
 │   └── index.html
 ├── tests/
+│   ├── conftest.py
+│   ├── test_contacts_extract.py
+│   ├── test_dates_parse.py
+│   ├── test_education_fallback.py
+│   ├── test_experience_fallback.py
+│   ├── test_parser_pipeline_contract.py
+│   ├── test_projects_contract.py
+│   ├── test_resume_parser_entrypoint.py
+│   ├── test_sections_split.py
+│   ├── test_skills_extract.py
 │   └── test_smoke.py
 ├── uploads/
 ├── .gitattributes
@@ -950,11 +987,12 @@ ProjectUnknown/
 ├── dump.txt
 ├── dump_project.py
 ├── Procfile
+├── pytest.ini
 ├── README.md
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 6  Files: 32
+Directories: 9  Files: 48
 
 ================================================================================
 FILE CONTENTS
@@ -2069,6 +2107,15 @@ if __name__ == "__main__":
 
 
 ================================================================================
+// Path: pytest.ini
+================================================================================
+
+[pytest]
+testpaths = tests
+pythonpath = .
+
+
+================================================================================
 // Path: requirements.txt
 ================================================================================
 
@@ -2222,17 +2269,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
           cache: "pip"
 
-      - name: Install minimal deps for tests
+      - name: Install CI deps (lightweight)
         run: |
           python -m pip install --upgrade pip
-          pip install Flask Werkzeug pytest
+          pip install \
+            Flask Werkzeug pytest \
+            regex python-dateutil phonenumbers email-validator \
+            pydantic rapidfuzz langdetect dateparser filetype
 
       - name: Run tests
-        run: |
-          pytest -q
+        run: pytest -q
 
 
 ================================================================================
@@ -2253,18 +2302,31 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Render deploy hook
+      - name: Trigger Render deploy hook (skip if secret missing)
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
           if [ -z "${RENDER_DEPLOY_HOOK_URL:-}" ]; then
-            echo "Missing secret: RENDER_DEPLOY_HOOK_URL"
-            echo "Add it in GitHub: Settings -> Secrets and variables -> Actions"
-            exit 1
+            echo "Skipping deploy: RENDER_DEPLOY_HOOK_URL is not set."
+            exit 0
           fi
 
           curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL"
           echo "Render deploy triggered."
+
+
+================================================================================
+// Path: .pytest_cache/README.md
+================================================================================
+
+# pytest cache directory #
+
+This directory contains data from the pytest's cache plugin,
+which provides the `--lf` and `--ff` options, as well as the `cache` fixture.
+
+**Do not** commit this to version control.
+
+See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more information.
 
 
 ================================================================================
@@ -4919,6 +4981,399 @@ def split_sections(text: str) -> dict[str, list[str]]:
 </html>
 
 ================================================================================
+// Path: tests/conftest.py
+================================================================================
+
+# tests/conftest.py
+import sys
+import types
+
+# Pytest imports conftest BEFORE importing test modules, so this prevents import-time crashes
+# when ats_parser/__init__.py pulls in ats_parser/ingest.py (which imports fitz/pdfplumber).
+
+def _stub_module(name: str) -> None:
+    if name not in sys.modules:
+        sys.modules[name] = types.ModuleType(name)
+
+_stub_module("fitz")        # PyMuPDF
+_stub_module("pdfplumber")  # pdfplumber
+
+
+================================================================================
+// Path: tests/test_contacts_extract.py
+================================================================================
+
+from ats_parser.rules import extract_contacts
+
+
+def test_extract_contacts_happy_path():
+    text = """
+Tim Nguyen
+Montreal, QC
+tim@example.com
+(514) 555-1234
+https://github.com/RealTimGFM
+https://www.linkedin.com/in/timnguyen
+"""
+    c = extract_contacts(text)
+    assert c["email"] == "tim@example.com"
+    assert c["phone"] and "+1" in c["phone"]
+    assert "github.com" in " ".join(c["links"]).lower()
+    assert c["name"] == "Tim Nguyen"
+
+
+def test_extract_contacts_no_contacts_is_safe():
+    text = "Just some text with no email and no phone."
+    c = extract_contacts(text)
+    assert c["email"] == ""
+    assert c["phone"] == ""
+    assert c["links"] == []
+    assert c["name"] in ("",)
+
+
+================================================================================
+// Path: tests/test_dates_parse.py
+================================================================================
+
+import pytest
+from ats_parser.rules import parse_date_range
+
+
+@pytest.mark.parametrize(
+    "s, exp_start, exp_end",
+    [
+        ("2008 – Present", "2008-01", "Present"),
+        ("2006 – 2007", "2006-01", "2007-01"),
+        ("Jun 2006 – Sep 2006", "2006-06", "2006-09"),
+        ("06/2006 – 09/2006", "2006-06", "2006-09"),
+        ("June – Sept 2006", "2006-06", "2006-09"),  # borrow year
+    ],
+)
+def test_parse_date_range_common_cases(s, exp_start, exp_end):
+    start, end, months = parse_date_range(s)
+    assert start == exp_start
+    assert end == exp_end
+    # months may be None depending on bad input; for these it should be computed except Present
+    if exp_end != "Present":
+        assert isinstance(months, int) and months >= 1
+
+
+def test_parse_date_range_garbage_is_safe():
+    start, end, months = parse_date_range("SomeTime – Whenever")
+    assert start is None and end is None and months is None
+
+
+================================================================================
+// Path: tests/test_education_fallback.py
+================================================================================
+
+from ats_parser.rules import fallback_education
+
+
+def test_fallback_education_merges_degree_and_school_lines():
+    lines = [
+        "Diploma of College Studies DEC – Computer Science",
+        "LaSalle College, Montreal, QC",
+        "2022 – 2024",
+    ]
+    out = fallback_education(lines)
+    assert len(out) == 1
+    assert "Diploma" in (out[0]["degree"] or "")
+    assert "LaSalle" in (out[0]["school"] or "")
+    assert out[0]["dates"]["start"]
+
+
+def test_fallback_education_empty_is_safe():
+    assert fallback_education([]) == []
+
+
+================================================================================
+// Path: tests/test_experience_fallback.py
+================================================================================
+
+import pytest
+from ats_parser.rules import fallback_experience
+
+
+def test_fallback_experience_two_items_happy_path_creates_items():
+    text = """
+2020 – 2021
+Software Developer at Example Inc
+- Built APIs
+- Improved performance
+
+2018 – 2020
+Analyst at Another Company
+- Analyzed data
+"""
+    items = fallback_experience(text)
+    assert len(items) == 2
+    assert items[0]["title"] and items[0]["company"]
+    assert items[0]["dates"]["start"] and items[0]["dates"]["end"]
+    assert isinstance(items[0]["bullets"], list)  # current behavior: may be empty
+
+
+@pytest.mark.xfail(
+    reason="Known limitation: bullet lines like '- Built APIs' currently get misclassified as titles, so bullets are dropped. Fix later."
+)
+def test_fallback_experience_collects_bullets_happy_path():
+    text = """
+2020 – 2021
+Software Developer at Example Inc
+- Built APIs
+- Improved performance
+"""
+    items = fallback_experience(text)
+    assert items and items[0]["bullets"]  # desired behavior
+
+
+================================================================================
+// Path: tests/test_parser_pipeline_contract.py
+================================================================================
+
+import pytest
+
+
+@pytest.mark.xfail(reason="Pipeline must add projects + warnings. Resume model currently has no projects and no warnings contract.")
+def test_parse_file_returns_partial_results_with_warnings(monkeypatch):
+    # Import after conftest stubs heavy libs
+    from ats_parser import parser as p
+
+    # Mock PDF ingest
+    sample_text = """
+Tim Nguyen
+tim@example.com
+
+Academic Projects
+StockAI — Python — 2024 — https://github.com/x
+Role: Backend Developer
+Tech: Python, Pandas
+
+Experience
+2020 – 2021
+Software Developer at Example Inc
+- Built APIs
+"""
+
+    monkeypatch.setattr(p, "read_pdf_text", lambda path: (sample_text, 0))
+
+    res = p.parse_file("dummy.pdf")
+
+    # Contract: warnings exist (B)
+    warnings = res.flags.get("warnings")
+    assert isinstance(warnings, list)
+
+    # Contract: projects separate from experience
+    assert hasattr(res, "projects")
+    assert res.projects, "Projects should be extracted"
+    assert res.experience, "Experience should be extracted"
+
+
+================================================================================
+// Path: tests/test_projects_contract.py
+================================================================================
+
+import pytest
+
+
+def _get_projects_extractor():
+    # Contract: implement one of these in ats_parser.rules
+    import ats_parser.rules as rules
+    if hasattr(rules, "extract_projects"):
+        return rules.extract_projects
+    if hasattr(rules, "fallback_projects"):
+        return rules.fallback_projects
+    return None
+
+
+@pytest.mark.xfail(reason="Projects extraction not implemented yet (title, tech_stack, links, role, date_range).")
+def test_projects_extraction_happy_path_structured_fields():
+    fn = _get_projects_extractor()
+    assert fn is not None, "Implement ats_parser.rules.extract_projects() or fallback_projects()"
+
+    lines = [
+        "StockAI — Quant Research Platform",
+        "Role: Backend Developer",
+        "Tech: Python, Pandas, SQL",
+        "2024 – Present",
+        "https://github.com/RealTimGFM/StockAI",
+        "- Built backtesting pipeline",
+    ]
+    projects = fn(lines)
+
+    assert isinstance(projects, list) and len(projects) >= 1
+    p = projects[0]
+
+    # Required fields per your requirement
+    assert p.get("title")
+    assert p.get("role")
+    assert isinstance(p.get("tech_stack"), list)
+    assert isinstance(p.get("links"), list)
+    assert isinstance(p.get("dates"), dict)
+    assert "start" in p["dates"] and "end" in p["dates"]
+
+
+@pytest.mark.xfail(reason="Need disambiguation so job titles like 'Project Manager' stay in EXPERIENCE, not PROJECTS.")
+def test_word_project_in_job_title_is_experience_not_project():
+    # This is a contract test: future logic should ensure this never becomes a project.
+    fn = _get_projects_extractor()
+    assert fn is not None
+
+    lines = [
+        "Project Manager at Example Inc",
+        "2020 – 2021",
+        "- Managed delivery",
+    ]
+    projects = fn(lines)
+    assert projects == [], "Project Manager is EXPERIENCE, not a project"
+
+
+================================================================================
+// Path: tests/test_resume_parser_entrypoint.py
+================================================================================
+
+import pytest
+
+
+def test_parse_resume_pdf_calls_parse_file_and_adapt(monkeypatch, tmp_path):
+    import resume_parser
+
+    calls = {"parse_file": 0, "adapt": 0}
+
+    class DummyResume:
+        flags = {}
+        raw_text = ""
+
+    def fake_parse_file(path):
+        calls["parse_file"] += 1
+        return DummyResume()
+
+    def fake_adapt(res):
+        calls["adapt"] += 1
+        return {"ok": True}
+
+    monkeypatch.setattr(resume_parser, "parse_file", fake_parse_file)
+    monkeypatch.setattr(resume_parser, "adapt_for_backend", fake_adapt)
+
+    f = tmp_path / "x.pdf"
+    f.write_bytes(b"%PDF-1.4 fake")
+
+    out = resume_parser.parse_resume(str(f))
+    assert out == {"ok": True}
+    assert calls["parse_file"] == 1
+    assert calls["adapt"] == 1
+
+
+def test_parse_resume_unsupported_extension_raises(tmp_path):
+    import resume_parser
+
+    f = tmp_path / "x.txt"
+    f.write_text("no")
+    with pytest.raises(ValueError):
+        resume_parser.parse_resume(str(f))
+
+
+================================================================================
+// Path: tests/test_sections_split.py
+================================================================================
+
+import pytest
+from ats_parser.sections import split_sections
+
+
+def test_split_sections_basic_headings_routed():
+    text = """
+Summary
+I build backend systems.
+
+Skills:
+Python, SQL
+
+Experience
+2020 - 2021
+Developer at Example Inc
+
+Education
+BSc - Computer Science
+LaSalle College, Montreal, QC
+"""
+    secs = split_sections(text)
+    assert "SUMMARY" in secs and secs["SUMMARY"]
+    assert "SKILLS" in secs and secs["SKILLS"]
+    assert "EXPERIENCE" in secs and secs["EXPERIENCE"]
+    assert "EDUCATION" in secs and secs["EDUCATION"]
+
+
+@pytest.mark.xfail(reason="Projects currently route into EXPERIENCE because EXPERIENCE regex includes projects?. Must be separated.")
+def test_projects_heading_must_route_to_projects_not_experience():
+    text = """
+Projects
+StockAI — Python, Pandas — 2024
+- Built backtesting engine
+
+Experience
+2021 - 2023
+Developer at Example Inc
+"""
+    secs = split_sections(text)
+    assert secs["PROJECTS"], "Projects section must not be empty"
+    assert not any("StockAI" in ln for ln in secs["EXPERIENCE"]), "Project lines must not appear in EXPERIENCE"
+
+
+@pytest.mark.xfail(reason="Projects heading aliases not complete yet (Academic/Side/Selected/Key).")
+@pytest.mark.parametrize(
+    "heading",
+    ["Projects", "Selected Projects", "Personal Projects", "Academic Projects", "Side Projects", "Key Projects"],
+)
+def test_projects_heading_aliases_all_map_to_projects(heading):
+    text = f"""
+{heading}
+MyCoolApp — Flask — 2024
+- Did X
+"""
+    secs = split_sections(text)
+    assert secs["PROJECTS"], f"{heading} should map to PROJECTS"
+
+
+================================================================================
+// Path: tests/test_skills_extract.py
+================================================================================
+
+import pytest
+from ats_parser.rules import extract_skills, extract_skills_from_text
+
+
+def test_extract_skills_section_happy_path_dedupes():
+    lines = ["Python, SQL, Flask, Python", "Docker | Git"]
+    out = extract_skills(lines)
+    assert "Python" in out and "SQL" in out and "Flask" in out
+    assert out.count("Python") == 1
+
+
+@pytest.mark.xfail(reason="You want allowlist-only skills (dataset). Current extractor keeps unknown tech tokens too.")
+def test_extract_skills_must_be_allowlist_only():
+    lines = ["Python, FooBarTech, SQL, BazQuxFramework"]
+    out = extract_skills(lines)
+    assert "Python" in out and "SQL" in out
+    assert "FooBarTech" not in out
+    assert "BazQuxFramework" not in out
+
+
+def test_extract_skills_from_text_finds_skills_block():
+    text = """
+Summary
+blah blah
+
+Skills: Python, SQL, Flask
+Experience
+2020 - 2021
+Developer at X
+"""
+    out = extract_skills_from_text(text)
+    assert "Python" in out and "SQL" in out and "Flask" in out
+
+
+================================================================================
 // Path: tests/test_smoke.py
 ================================================================================
 
@@ -4928,7 +5383,12 @@ import sys
 import types
 
 import pytest
+from pathlib import Path
 
+# Ensure project root is importable (so `import backend` works)
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 def _import_fresh(module_name: str):
     """Import a module after removing it from sys.modules (so env vars apply)."""
@@ -5014,4 +5474,4 @@ def test_backend_allowed_file_and_init_db(tmp_path, monkeypatch):
 
 
 
-// Summary: wrote 28 files, skipped 55995 files.
+// Summary: wrote 40 files, skipped 56082 files.
