@@ -23,7 +23,7 @@ jobs:
       - name: Install minimal deps for tests
         run: |
           python -m pip install --upgrade pip
-          pip install Flask Werkzeug pytest
+          pip install Flask Werkzeug pytest pydantic email-validator phonenumbers rapidfuzz
 
       - name: Run tests
         run: |

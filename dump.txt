@@ -2,7 +2,7 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-12-22T20:57:32Z
+Generated: 2025-12-23T00:21:53Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -15,6 +15,14 @@ ProjectUnknown/
 │   └── workflows/
 │       ├── ci.yml
 │       └── deploy-render.yml
+├── .pytest_cache/
+│   ├── v/
+│   │   └── cache/
+│   │       ├── lastfailed
+│   │       └── nodeids
+│   ├── .gitignore
+│   ├── CACHEDIR.TAG
+│   └── README.md
 ├── ats_parser/
 │   ├── __init__.py
 │   ├── ingest.py
@@ -46,11 +54,12 @@ ProjectUnknown/
 ├── dump.txt
 ├── dump_project.py
 ├── Procfile
+├── pytest.ini
 ├── README.md
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 6  Files: 32
+Directories: 9  Files: 38
 
 ================================================================================
 FILE CONTENTS
@@ -906,7 +915,7 @@ if __name__ == "__main__":
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-12-22T20:57:32Z
+Generated: 2025-12-23T00:21:53Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -919,6 +928,14 @@ ProjectUnknown/
 │   └── workflows/
 │       ├── ci.yml
 │       └── deploy-render.yml
+├── .pytest_cache/
+│   ├── v/
+│   │   └── cache/
+│   │       ├── lastfailed
+│   │       └── nodeids
+│   ├── .gitignore
+│   ├── CACHEDIR.TAG
+│   └── README.md
 ├── ats_parser/
 │   ├── __init__.py
 │   ├── ingest.py
@@ -950,11 +967,12 @@ ProjectUnknown/
 ├── dump.txt
 ├── dump_project.py
 ├── Procfile
+├── pytest.ini
 ├── README.md
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 6  Files: 32
+Directories: 9  Files: 38
 
 ================================================================================
 FILE CONTENTS
@@ -2069,6 +2087,15 @@ if __name__ == "__main__":
 
 
 ================================================================================
+// Path: pytest.ini
+================================================================================
+
+[pytest]
+testpaths = tests
+pythonpath = .
+
+
+================================================================================
 // Path: requirements.txt
 ================================================================================
 
@@ -2253,18 +2280,31 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Render deploy hook
+      - name: Trigger Render deploy hook (skip if secret missing)
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
           if [ -z "${RENDER_DEPLOY_HOOK_URL:-}" ]; then
-            echo "Missing secret: RENDER_DEPLOY_HOOK_URL"
-            echo "Add it in GitHub: Settings -> Secrets and variables -> Actions"
-            exit 1
+            echo "Skipping deploy: RENDER_DEPLOY_HOOK_URL is not set."
+            exit 0
           fi
 
           curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL"
           echo "Render deploy triggered."
+
+
+================================================================================
+// Path: .pytest_cache/README.md
+================================================================================
+
+# pytest cache directory #
+
+This directory contains data from the pytest's cache plugin,
+which provides the `--lf` and `--ff` options, as well as the `cache` fixture.
+
+**Do not** commit this to version control.
+
+See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more information.
 
 
 ================================================================================
@@ -4928,7 +4968,12 @@ import sys
 import types
 
 import pytest
+from pathlib import Path
 
+# Ensure project root is importable (so `import backend` works)
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 def _import_fresh(module_name: str):
     """Import a module after removing it from sys.modules (so env vars apply)."""
@@ -5014,4 +5059,4 @@ def test_backend_allowed_file_and_init_db(tmp_path, monkeypatch):
 
 
 
-// Summary: wrote 28 files, skipped 55995 files.
+// Summary: wrote 30 files, skipped 56047 files.
