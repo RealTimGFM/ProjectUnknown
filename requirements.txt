@@ -1,48 +1,23 @@
-# --- Web (Flask app you have now) ---
+# --- Web (Flask app) ---
 Flask>=3.0.3
 Werkzeug>=3.0.3
-Jinja2>=3.1.4
-itsdangerous>=2.2.0
-click>=8.1.7
 gunicorn
 pytest
 
-# --- PDF parsing (pip-only) ---
+# --- PDF parsing ---
 PyMuPDF>=1.24
 pdfplumber>=0.11
-pdfminer.six>=20231228
 
-# --- OCR fallback (no system deps) ---
-easyocr>=1.7.2
-torch>=2.3          # CPU wheel
-
-# --- NLP / parsing helpers ---
+# --- Parsing helpers used by ats_parser ---
 regex>=2024.9.11
 python-dateutil>=2.9.0.post0
 phonenumbers>=8.13.44
 email-validator>=2.2.0
-
-# --- Optional, pure-Python file type sniffing used in backend.py (safe to keep) ---
 filetype>=1.2.0
 
-# --- Nice-to-have logs ---
-rich>=13.8
-
-# --- NLP ---
-spacy>=3.7
-srsly>=2.4
-typer>=0.12
-
-# optional but useful:
-spacy-lookups-data>=1.0
-
-# --- New/updated deps for ats_parser (hybrid parser) ---
 pydantic>=2.7
 rapidfuzz>=3.9
 langdetect>=1.0.9
-httpx>=0.27
 requests>=2.32
-openai>=1.40        # only needed if USE_LLM=1
-
 dateparser>=1.2
-python-docx>=1.1.0
+python-docx>=1.1
