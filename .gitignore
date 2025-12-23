@@ -4,3 +4,10 @@ dump.txt
 *cache*
 database.db
 dump.txt
+
+# Allowlist raw data (large / reproducible)
+data/allowlists/raw/
+*.sql
+*.csv
+*.tsv
+*.jsonl
