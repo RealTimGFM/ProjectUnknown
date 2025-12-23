@@ -1,15 +1,13 @@
+# tests/conftest.py
 import sys
 import types
-import pytest
 
+# Pytest imports conftest BEFORE importing test modules, so this prevents import-time crashes
+# when ats_parser/__init__.py pulls in ats_parser/ingest.py (which imports fitz/pdfplumber).
 
-@pytest.fixture(autouse=True)
-def _stub_heavy_pdf_libs():
-    """
-    Prevent import-time failures for ats_parser.ingest which imports fitz/pdfplumber.
-    We never call real PDF parsing in unit tests; pipeline tests monkeypatch read_pdf_text.
-    """
-    if "fitz" not in sys.modules:
-        sys.modules["fitz"] = types.SimpleNamespace(open=lambda *a, **k: None, Matrix=lambda *a, **k: None)
-    if "pdfplumber" not in sys.modules:
-        sys.modules["pdfplumber"] = types.SimpleNamespace(open=lambda *a, **k: None)
+def _stub_module(name: str) -> None:
+    if name not in sys.modules:
+        sys.modules[name] = types.ModuleType(name)
+
+_stub_module("fitz")        # PyMuPDF
+_stub_module("pdfplumber")  # pdfplumber

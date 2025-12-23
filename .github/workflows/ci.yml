@@ -17,14 +17,16 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
           cache: "pip"
 
-      - name: Install minimal deps for tests
+      - name: Install CI deps (lightweight)
         run: |
           python -m pip install --upgrade pip
-          pip install Flask Werkzeug pytest pydantic email-validator phonenumbers rapidfuzz
+          pip install \
+            Flask Werkzeug pytest \
+            regex python-dateutil phonenumbers email-validator \
+            pydantic rapidfuzz langdetect dateparser filetype
 
       - name: Run tests
-        run: |
-          pytest -q
+        run: pytest -q
