@@ -388,19 +388,37 @@ def fallback_experience(text_or_lines) -> list[dict]:
     ]
     items, i, n = [], 0, len(lines)
 
+    def is_bullet(s: str) -> bool:
+        return bool(BULLET.match(s))
+
     def gather_desc(start_idx: int):
         buf, j = [], start_idx
         while j < n:
             s = lines[j]
+
+            # Stop if next entry begins (date line)
             if DATE_RE.search(s):
                 break
+
+            # Always accept bullets (do NOT misclassify bullets as titles/companies)
+            if is_bullet(s):
+                buf.append(BULLET.sub("", s).strip())
+                j += 1
+                continue
+
+            # For non-bullets, stop if it looks like the next header/title/company
             if _looks_like_title(s) or _looks_like_company(s):
                 break
+
+            # Long non-bullet lines usually mean we're drifting into other sections
             if len(s) > 110:
                 break
-            buf.append(BULLET.sub("", s))
+
+            # Otherwise treat as a normal description line
+            buf.append(BULLET.sub("", s).strip())
             j += 1
-        return ("\n".join(buf).strip(), j)
+
+        return ("\n".join([b for b in buf if b]).strip(), j)
 
     while i < n:
         line = lines[i]
@@ -409,26 +427,31 @@ def fallback_experience(text_or_lines) -> list[dict]:
             continue
 
         start, end, months = parse_date_range(line)
-        title, company, forward_used = "", "", False
+        title, company = "", ""
+        used_forward = 0  # how many lines after the date we consumed as title/company
 
-        # Prefer forward look:
-        if i + 1 < n:
+        # Prefer forward look (but ignore bullets)
+        if i + 1 < n and not is_bullet(lines[i + 1]):
             t1, c1 = _split_title_company_forward(lines[i + 1])
             if t1 or c1:
-                title, company, forward_used = t1, c1, True
+                title, company = t1, c1
+                used_forward = 1
             elif _looks_like_title(lines[i + 1]):
                 title = lines[i + 1]
-                forward_used = True
-                if i + 2 < n and _looks_like_company(lines[i + 2]):
+                used_forward = 1
+
+                # If next line is company (and not bullet), consume it too
+                if i + 2 < n and (not is_bullet(lines[i + 2])) and _looks_like_company(lines[i + 2]):
                     company = lines[i + 2]
+                    used_forward = 2
 
         # Fallback: look behind
         if not title and not company:
             ctx = lines[max(0, i - 5) : i]
             title, company = _guess_title_company_from_buffer(ctx)
 
-        # Description starts after any forward-used line(s)
-        desc_start = i + (2 if forward_used else 1)
+        # Description starts right after the date line + any forward-consumed lines
+        desc_start = i + 1 + used_forward
         desc, stop = gather_desc(desc_start)
 
         if title or company or desc:
@@ -443,6 +466,7 @@ def fallback_experience(text_or_lines) -> list[dict]:
                     "confidence": 0.6 if (title or company) else 0.55,
                 }
             )
+
         i = max(i + 1, stop)
 
     # dedupe
@@ -458,6 +482,7 @@ def fallback_experience(text_or_lines) -> list[dict]:
             seen.add(key)
             uniq.append(it)
     return uniq
+
 
 
 def skills_text(lines: list[str]) -> str:

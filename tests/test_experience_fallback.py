@@ -1,8 +1,9 @@
-import pytest
+# tests/test_experience_fallback.py
+
 from ats_parser.rules import fallback_experience
 
 
-def test_fallback_experience_two_items_happy_path_creates_items():
+def test_fallback_experience_two_items_happy_path():
     text = """
 2020 – 2021
 Software Developer at Example Inc
@@ -17,12 +18,9 @@ Analyst at Another Company
     assert len(items) == 2
     assert items[0]["title"] and items[0]["company"]
     assert items[0]["dates"]["start"] and items[0]["dates"]["end"]
-    assert isinstance(items[0]["bullets"], list)  # current behavior: may be empty
+    assert items[0]["bullets"]
 
 
-@pytest.mark.xfail(
-    reason="Known limitation: bullet lines like '- Built APIs' currently get misclassified as titles, so bullets are dropped. Fix later."
-)
 def test_fallback_experience_collects_bullets_happy_path():
     text = """
 2020 – 2021
@@ -31,4 +29,5 @@ Software Developer at Example Inc
 - Improved performance
 """
     items = fallback_experience(text)
-    assert items and items[0]["bullets"]  # desired behavior
+    assert len(items) == 1
+    assert items[0]["bullets"] == ["Built APIs", "Improved performance"]
