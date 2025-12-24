@@ -39,8 +39,13 @@ def parse_file(path: str) -> Resume:
 
     # ----- PROJECTS -----
     projects_lines = secs.get("PROJECTS") or []
+    if isinstance(projects_lines, str):
+        projects_lines = [x.strip() for x in projects_lines.splitlines() if x.strip()]
+
     try:
-        projects_raw = rules.extract_projects(projects_lines)
+        # split_sections() usually returns the section content WITHOUT the header line,
+        # but extract_projects() expects to see a Projects heading to "arm" the parser.
+        projects_raw = rules.extract_projects(["PROJECTS"] + (projects_lines or []))
         projects = [ProjectItem(**p) for p in (projects_raw or [])]
     except Exception as e:
         projects = []
@@ -48,6 +53,7 @@ def parse_file(path: str) -> Resume:
 
     if projects_lines and not projects:
         warnings.append("Projects section present but no projects were extracted.")
+
 
     # ----- CONTACTS + SKILLS -----
     contacts = rules.extract_contacts(text)

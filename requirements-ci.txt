@@ -1,2 +1,14 @@
--r requirements.txt
 pytest
+
+Flask
+Werkzeug
+
+requests
+pydantic[email]
+regex
+python-dateutil
+phonenumbers
+rapidfuzz
+langdetect
+dateparser
+filetype
