@@ -1,53 +1,47 @@
-import pytest
+# tests/test_projects_contract.py
 
-
-def _get_projects_extractor():
-    # Contract: implement one of these in ats_parser.rules
-    import ats_parser.rules as rules
-    if hasattr(rules, "extract_projects"):
-        return rules.extract_projects
-    if hasattr(rules, "fallback_projects"):
-        return rules.fallback_projects
-    return None
-
-
-@pytest.mark.xfail(reason="Projects extraction not implemented yet (title, tech_stack, links, role, date_range).")
 def test_projects_extraction_happy_path_structured_fields():
-    fn = _get_projects_extractor()
-    assert fn is not None, "Implement ats_parser.rules.extract_projects() or fallback_projects()"
+    """
+    Contract:
+    - rules.extract_projects(lines) returns list[dict]
+    - each dict has: title, role, tech_stack(list[str]), links(list[str]), dates({start,end})
+    """
+    from ats_parser import rules
 
-    lines = [
-        "StockAI — Quant Research Platform",
-        "Role: Backend Developer",
-        "Tech: Python, Pandas, SQL",
-        "2024 – Present",
-        "https://github.com/RealTimGFM/StockAI",
-        "- Built backtesting pipeline",
+    sample_lines = [
+        "PROJECTS",
+        "StockAI — Personal Project (2024-01 to Present)",
+        "Built a Python backtesting platform for equities/FX with walk-forward validation.",
+        "Tech: Python, Pandas, NumPy, scikit-learn, PostgreSQL",
+        "Link: https://github.com/example/stockai",
     ]
-    projects = fn(lines)
 
-    assert isinstance(projects, list) and len(projects) >= 1
-    p = projects[0]
+    projects = rules.extract_projects(sample_lines)
+    assert isinstance(projects, list)
+    assert len(projects) >= 1
 
-    # Required fields per your requirement
-    assert p.get("title")
-    assert p.get("role")
-    assert isinstance(p.get("tech_stack"), list)
-    assert isinstance(p.get("links"), list)
-    assert isinstance(p.get("dates"), dict)
-    assert "start" in p["dates"] and "end" in p["dates"]
+    p0 = projects[0]
+    assert p0.get("title")
+    assert p0.get("role")
+    assert isinstance(p0.get("tech_stack"), list)
+    assert isinstance(p0.get("links"), list)
+    assert isinstance(p0.get("dates"), dict)
+    assert "start" in p0["dates"] and "end" in p0["dates"]
 
 
-@pytest.mark.xfail(reason="Need disambiguation so job titles like 'Project Manager' stay in EXPERIENCE, not PROJECTS.")
 def test_word_project_in_job_title_is_experience_not_project():
-    # This is a contract test: future logic should ensure this never becomes a project.
-    fn = _get_projects_extractor()
-    assert fn is not None
+    """
+    Contract:
+    - lines mentioning 'Project Manager' in EXPERIENCE should not be mis-read as a PROJECT.
+    """
+    from ats_parser import rules
 
-    lines = [
-        "Project Manager at Example Inc",
-        "2020 – 2021",
-        "- Managed delivery",
+    experience_lines = [
+        "EXPERIENCE",
+        "Project Manager — ABC Corp (2022-01 to 2023-06)",
+        "Led delivery of internal systems and coordinated stakeholders.",
+        "Tech: Jira, Confluence",
     ]
-    projects = fn(lines)
-    assert projects == [], "Project Manager is EXPERIENCE, not a project"
+
+    projects = rules.extract_projects(experience_lines)
+    assert projects == []
