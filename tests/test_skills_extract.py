@@ -9,7 +9,6 @@ def test_extract_skills_section_happy_path_dedupes():
     assert out.count("Python") == 1
 
 
-@pytest.mark.xfail(reason="You want allowlist-only skills (dataset). Current extractor keeps unknown tech tokens too.")
 def test_extract_skills_must_be_allowlist_only():
     lines = ["Python, FooBarTech, SQL, BazQuxFramework"]
     out = extract_skills(lines)

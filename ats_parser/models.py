@@ -8,6 +8,14 @@ class DateSpan(BaseModel):
     end: Optional[str] = Field(default=None, description="YYYY-MM or 'Present' or None")
     months: Optional[int] = None
 
+class ProjectItem(BaseModel):
+    title: str
+    role: str | None = None
+    tech_stack: list[str] = Field(default_factory=list)
+    links: list[str] = Field(default_factory=list)
+    dates: DateSpan = Field(default_factory=DateSpan)
+    bullets: list[str] = Field(default_factory=list)
+
 class ExperienceItem(BaseModel):
     title: Optional[str] = ""
     company: Optional[str] = ""
@@ -44,4 +52,5 @@ class Resume(BaseModel):
     certifications: List[str] = []
     languages: List[str] = []
     raw_text: str = ""
+    projects: list[ProjectItem] = Field(default_factory=list)
     flags: dict = {}
