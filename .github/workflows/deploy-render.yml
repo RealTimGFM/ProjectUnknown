@@ -1,8 +1,9 @@
-name: Deploy to Render
+name: Deploy to Render (after CI)
 
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -10,15 +11,21 @@ permissions:
 
 jobs:
   deploy:
+    # Auto-deploy only when CI succeeded on main
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Render deploy hook (skip if secret missing)
+      - name: Trigger Render deploy hook
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
           if [ -z "${RENDER_DEPLOY_HOOK_URL:-}" ]; then
-            echo "Skipping deploy: missing secret RENDER_DEPLOY_HOOK_URL"
-            exit 0
+            echo "Missing secret: RENDER_DEPLOY_HOOK_URL"
+            echo "Add it in GitHub: Settings -> Secrets and variables -> Actions"
+            exit 1
           fi
 
           curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL"
