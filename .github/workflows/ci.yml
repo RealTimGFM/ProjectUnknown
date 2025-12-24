@@ -26,9 +26,49 @@ jobs:
 
       # Optional but recommended if your compiled allowlists are NOT committed
       # (safe to keep even if they are committed)
-      - name: Build allowlists
+      - name: Verify compiled allowlists exist
+        shell: bash
         run: |
-          python -m tools.build_allowlists
+          python - <<'PY'
+          from pathlib import Path
+
+          # Accept either location (depending on your repo layout)
+          candidates = [
+              Path("compiled"),
+              Path("data/allowlists/compiled"),
+          ]
+
+          required = [
+              "tech_allowlist.txt",
+              "tech_aliases.json",
+              "skills_allowlist.txt",
+              "skills_aliases.json",
+          ]
+
+          found_base = None
+          for base in candidates:
+              if all((base / f).exists() for f in required):
+                  found_base = base
+                  break
+
+          if not found_base:
+              missing = []
+              for base in candidates:
+                  for f in required:
+                      if not (base / f).exists():
+                          missing.append(str(base / f))
+              raise SystemExit(
+                  "Missing compiled allowlists. Expected these files in either "
+                  "'compiled/' or 'data/allowlists/compiled/'. Missing:\n- "
+                  + "\n- ".join(sorted(set(missing)))
+                  + "\n\nIf you intended to rebuild them locally, run:\n"
+                  "  python -m tools.build_allowlists\n"
+                  "(requires raw datasets under data/allowlists/raw/...)"
+              )
+
+          print(f"OK: compiled allowlists present in: {found_base}")
+          PY
+
 
       - name: Run tests
         run: |
