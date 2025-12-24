@@ -2,7 +2,7 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-12-24T17:03:30Z
+Generated: 2025-12-24T18:57:03Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -86,8 +86,10 @@ ProjectUnknown/
 │   ├── test_dates_parse.py
 │   ├── test_education_fallback.py
 │   ├── test_experience_fallback.py
+│   ├── test_experience_tech_allowlist.py
 │   ├── test_parser_pipeline_contract.py
 │   ├── test_projects_contract.py
+│   ├── test_projects_tech_allowlist.py
 │   ├── test_resume_parser_entrypoint.py
 │   ├── test_sections_split.py
 │   ├── test_skills_extract.py
@@ -108,7 +110,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 18  Files: 78
+Directories: 18  Files: 80
 
 ================================================================================
 FILE CONTENTS
@@ -964,7 +966,7 @@ if __name__ == "__main__":
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-12-24T17:03:30Z
+Generated: 2025-12-24T18:57:03Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -1048,8 +1050,10 @@ ProjectUnknown/
 │   ├── test_dates_parse.py
 │   ├── test_education_fallback.py
 │   ├── test_experience_fallback.py
+│   ├── test_experience_tech_allowlist.py
 │   ├── test_parser_pipeline_contract.py
 │   ├── test_projects_contract.py
+│   ├── test_projects_tech_allowlist.py
 │   ├── test_resume_parser_entrypoint.py
 │   ├── test_sections_split.py
 │   ├── test_skills_extract.py
@@ -1070,7 +1074,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 18  Files: 78
+Directories: 18  Files: 80
 
 ================================================================================
 FILE CONTENTS
@@ -2199,26 +2203,19 @@ pythonpath = .
 ================================================================================
 
 pytest
+
 Flask
 Werkzeug
 
-# Imported by ats_parser/llm.py
 requests
-
-# Your pydantic models use EmailStr -> requires email-validator
 pydantic[email]
-
-# Imported by ats_parser/ingest.py as `fitz`
-PyMuPDF
-
-# Used by parsing rules/tests
-phonenumbers
-dateparser
-rapidfuzz
-langdetect
-filetype
 regex
 python-dateutil
+phonenumbers
+rapidfuzz
+langdetect
+dateparser
+filetype
 
 
 ================================================================================
@@ -2229,7 +2226,6 @@ python-dateutil
 Flask>=3.0.3
 Werkzeug>=3.0.3
 gunicorn
-pytest
 
 # --- PDF parsing ---
 PyMuPDF>=1.24
@@ -2239,10 +2235,9 @@ pdfplumber>=0.11
 regex>=2024.9.11
 python-dateutil>=2.9.0.post0
 phonenumbers>=8.13.44
-email-validator>=2.2.0
 filetype>=1.2.0
 
-pydantic>=2.7
+pydantic[email]>=2.7
 rapidfuzz>=3.9
 langdetect>=1.0.9
 requests>=2.32
@@ -2335,13 +2330,12 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
   pull_request:
-    branches: ["main"]
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -2349,14 +2343,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.12"
           cache: "pip"
 
-      - name: Install dependencies
+      - name: Install CI deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
+          pip install -r requirement-ci.txt
 
       - name: Run tests
         run: |
@@ -2398,11 +2391,12 @@ jobs:
 // Path: .github/workflows/deploy-render.yml
 ================================================================================
 
-name: Deploy to Render
+name: Deploy to Render (after CI)
 
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -2410,15 +2404,21 @@ permissions:
 
 jobs:
   deploy:
+    # Auto-deploy only when CI succeeded on main
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Render deploy hook (skip if secret missing)
+      - name: Trigger Render deploy hook
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
           if [ -z "${RENDER_DEPLOY_HOOK_URL:-}" ]; then
-            echo "Skipping deploy: missing secret RENDER_DEPLOY_HOOK_URL"
-            exit 0
+            echo "Missing secret: RENDER_DEPLOY_HOOK_URL"
+            echo "Add it in GitHub: Settings -> Secrets and variables -> Actions"
+            exit 1
           fi
 
           curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL"
@@ -3088,11 +3088,12 @@ import phonenumbers
 import json
 from pathlib import Path
 
-
 try:
     import dateparser
 except Exception:
     dateparser = None
+
+TECH_LINE_RE = re.compile(r"^(tech|technologies|stack|tools)\s*:\s*(.+)$", re.I)
 
 LOCATION_HINT = re.compile(
     r"\b("
@@ -3269,7 +3270,6 @@ NEXT_SECTION_HEAD = re.compile(
     r"^(experience|work (?:history|experience)|employment|projects?|education|languages?|certifications?)\b",
     re.I,
 )
-
 
 
 def norm(s: str) -> str:
@@ -3523,7 +3523,11 @@ def fallback_experience(text_or_lines) -> list[dict]:
                 used_forward = 1
 
                 # If next line is company (and not bullet), consume it too
-                if i + 2 < n and (not is_bullet(lines[i + 2])) and _looks_like_company(lines[i + 2]):
+                if (
+                    i + 2 < n
+                    and (not is_bullet(lines[i + 2]))
+                    and _looks_like_company(lines[i + 2])
+                ):
                     company = lines[i + 2]
                     used_forward = 2
 
@@ -3534,7 +3538,27 @@ def fallback_experience(text_or_lines) -> list[dict]:
 
         # Description starts right after the date line + any forward-consumed lines
         desc_start = i + 1 + used_forward
+
+
+
         desc, stop = gather_desc(desc_start)
+
+        bullets = []
+        tech_tokens = []
+
+        if desc:
+            for raw_line in desc.split("\n"):
+                s = (raw_line or "").strip()
+                if not s:
+                    continue
+                mtech = TECH_LINE_RE.match(s)
+                if mtech:
+                    tech_blob = mtech.group(2)
+                    tech_tokens.extend(_split_simple_tokens(tech_blob))
+                else:
+                    bullets.append(s)
+
+        technologies = _filter_tech_allowlist(tech_tokens)
 
         if title or company or desc:
             items.append(
@@ -3543,11 +3567,12 @@ def fallback_experience(text_or_lines) -> list[dict]:
                     "company": company,
                     "location": "",
                     "dates": {"start": start, "end": end, "months": months},
-                    "bullets": [b for b in (desc.split("\n") if desc else []) if b],
-                    "technologies": [],
+                    "bullets": bullets,
+                    "technologies": technologies,
                     "confidence": 0.6 if (title or company) else 0.55,
                 }
             )
+
 
         i = max(i + 1, stop)
 
@@ -3564,7 +3589,6 @@ def fallback_experience(text_or_lines) -> list[dict]:
             seen.add(key)
             uniq.append(it)
     return uniq
-
 
 
 def skills_text(lines: list[str]) -> str:
@@ -3779,12 +3803,15 @@ def _split_on_separators(blob: str) -> list[str]:
             out.extend(norm(sp) for sp in subparts if norm(sp))
     return out
 
+
 # --- Allowlist (lazy-loaded) -------------------------------------------------
 
 _ALLOWLIST_CACHE = None
 
+
 def _norm_key(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip()).casefold()
+
 
 def _load_compiled_allowlists():
     """
@@ -3813,7 +3840,13 @@ def _load_compiled_allowlists():
     allow_items: list[str] = []
     for p in (tech_allow, skills_allow):
         try:
-            allow_items.extend([ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()])
+            allow_items.extend(
+                [
+                    ln.strip()
+                    for ln in p.read_text(encoding="utf-8").splitlines()
+                    if ln.strip()
+                ]
+            )
         except Exception:
             # Fail safe: do not break parsing if allowlist reading fails
             _ALLOWLIST_CACHE = (False, {}, {})
@@ -3858,7 +3891,14 @@ def extract_skills(lines: list[str]) -> list[str]:
     - If compiled allowlists are present and big enough: allowlist-only mode (no unknown tokens).
     - Otherwise: keep legacy heuristic fallback (so dev still works without the dataset).
     """
-    allow_enabled, canon_by_key, alias_to_canon = _load_compiled_allowlists()
+    skills_enabled, skills_canon_by_key, skills_alias_to_canon = (
+        _load_compiled_allowlists()
+    )
+    tech_enabled, tech_canon_by_key, tech_alias_to_canon = (
+        _load_compiled_tech_allowlists()
+    )
+
+    allow_enabled = bool(skills_enabled or tech_enabled)
 
     def add_skill(found: list[str], seen: set[str], value: str):
         k = value.casefold()
@@ -3866,15 +3906,69 @@ def extract_skills(lines: list[str]) -> list[str]:
             seen.add(k)
             found.append(value)
 
+    def simplify_label(label: str) -> str:
+        # Strip trailing parenthetical: "Python (computer programming)" -> "Python"
+        return re.sub(r"\s*\([^)]*\)\s*$", "", (label or "").strip()).strip()
+
+    def display_label(tok: str, canon: str) -> str:
+        """
+        Prefer clean UI labels:
+        - If canon is already clean: use simplified canon.
+        - If canon is a generic multi-word phrase but tok is a single tech-looking token: use tok.
+        """
+        tok_clean = (tok or "").strip().strip(",;")
+        canon_clean = simplify_label(canon)
+
+        # If canonical is generic (multiword) but the token is a single word (Git/SQL/etc), show token.
+        if " " in canon_clean and " " not in tok_clean and 1 <= len(tok_clean) <= 24:
+            # keep casing from resume; small improvement if user wrote lowercase
+            if tok_clean.islower():
+                # don't blindly uppercase (would make git->GIT); just capitalize
+                tok_clean = tok_clean[:1].upper() + tok_clean[1:]
+            return tok_clean
+
+        return canon_clean
+
+    # Load alias conflicts (skills only)
+    alias_conflicts: set[str] = set()
+    if allow_enabled:
+        cached = getattr(extract_skills, "_alias_conflicts_cache", None)
+        if cached is None:
+            try:
+                from pathlib import Path
+                import json
+
+                root = Path(__file__).resolve().parent.parent
+                p = root / "compiled" / "skills_alias_conflicts.json"
+                if p.exists():
+                    data = json.loads(p.read_text(encoding="utf-8"))
+                    if isinstance(data, dict):
+                        alias_conflicts = {str(k) for k in data.keys()}
+                    elif isinstance(data, list):
+                        tmp = set()
+                        for x in data:
+                            if isinstance(x, str):
+                                tmp.add(x)
+                            elif isinstance(x, dict) and "alias" in x:
+                                tmp.add(str(x["alias"]))
+                        alias_conflicts = tmp
+            except Exception:
+                alias_conflicts = set()
+            setattr(extract_skills, "_alias_conflicts_cache", alias_conflicts)
+        else:
+            alias_conflicts = cached
+
     # 1) Keep only the SKILLS block (stop on dates/long sentences/other sections)
-    buf = []
+    buf: list[str] = []
     for l in lines or []:
         s = norm(l)
         if not s:
             continue
-        if DATE_RE.search(s):  # skills lines usually don't have date ranges
+        if DATE_RE.search(s):
             break
-        if re.search(r"\b(education|experience|projects?|languages?|certifications?)\b", s, re.I):
+        if re.search(
+            r"\b(education|experience|projects?|languages?|certifications?)\b", s, re.I
+        ):
             break
         if len(s) > 100 and re.search(
             r"\b(built|designed|developed|managed|worked|implemented|created)\b",
@@ -3885,20 +3979,69 @@ def extract_skills(lines: list[str]) -> list[str]:
         buf.append(s)
 
     # 2) Tokenize on separators
-    tokens = []
+    tokens: list[str] = []
     for line in buf:
         tokens.extend(_split_on_separators(line))
 
-    # 3) Extract (lexicon + allowlist)
     found: list[str] = []
     seen: set[str] = set()
 
+    # --- Allowlist-only mode ---
+    if allow_enabled:
+        for tok in tokens:
+            low = tok.lower()
+            if low in _SOFT_SKILLS_IGNORE:
+                continue
+
+            key = _norm_key(tok)
+
+            # Prefer TECH allowlist (clean labels)
+            tech_canon = tech_alias_to_canon.get(key) or tech_canon_by_key.get(key)
+            if tech_canon:
+                add_skill(found, seen, display_label(tok, tech_canon))
+                continue
+
+            # Skills allowlist (skip conflicting aliases)
+            if key in alias_conflicts:
+                continue
+
+            skills_canon = skills_alias_to_canon.get(key) or skills_canon_by_key.get(
+                key
+            )
+            if skills_canon:
+                add_skill(found, seen, display_label(tok, skills_canon))
+                continue
+
+            # Optional: lexicon only if it resolves via allowlists
+            for lex_canon, rx in _SKILL_PATTERNS:
+                if rx.search(tok):
+                    lk = _norm_key(lex_canon)
+
+                    tech_canon2 = tech_alias_to_canon.get(lk) or tech_canon_by_key.get(
+                        lk
+                    )
+                    if tech_canon2:
+                        add_skill(found, seen, display_label(lex_canon, tech_canon2))
+                        break
+
+                    if lk in alias_conflicts:
+                        break
+
+                    skills_canon2 = skills_alias_to_canon.get(
+                        lk
+                    ) or skills_canon_by_key.get(lk)
+                    if skills_canon2:
+                        add_skill(found, seen, display_label(lex_canon, skills_canon2))
+                    break
+
+        return found[:100]
+
+    # --- Fallback mode (no dataset present) ---
     for tok in tokens:
         low = tok.lower()
         if low in _SOFT_SKILLS_IGNORE:
             continue
 
-        # 3a) Built-in lexicon always works (and is effectively a small internal allowlist)
         matched = False
         for canon, rx in _SKILL_PATTERNS:
             if rx.search(tok):
@@ -3908,22 +4051,14 @@ def extract_skills(lines: list[str]) -> list[str]:
         if matched:
             continue
 
-        # 3b) Dataset allowlist mode (no unknown tokens)
-        if allow_enabled:
-            key = _norm_key(tok)
-            canon = alias_to_canon.get(key) or canon_by_key.get(key)
-            if canon:
-                add_skill(found, seen, canon)
-            continue
-
-        # 4) Legacy fallback (only when allowlist mode is NOT enabled)
         if 1 <= len(tok.split()) <= 3 and not tok.endswith("."):
-            tok2 = re.sub(r"\s+(framework|library|stack|lang(uage)?)\b", "", tok, flags=re.I).strip()
+            tok2 = re.sub(
+                r"\s+(framework|library|stack|lang(uage)?)\b", "", tok, flags=re.I
+            ).strip()
             if tok2:
                 add_skill(found, seen, tok2)
 
-    return found[:100]  # cap to keep UI tidy
-
+    return found[:100]
 
 
 def extract_skills_from_text(text: str) -> list[str]:
@@ -3952,6 +4087,54 @@ def extract_skills_from_text(text: str) -> list[str]:
             return extract_skills(buf)
         i += 1
     return []
+
+
+def _load_compiled_tech_allowlists():
+    """
+    Loads compiled/tech_allowlist.txt and compiled/tech_aliases.json
+    Returns: (enabled: bool, canon_by_key: dict[str,str], alias_to_canon: dict[str,str])
+    """
+    cached = getattr(_load_compiled_tech_allowlists, "_cache", None)
+    if cached is not None:
+        return cached
+
+    try:
+        from pathlib import Path
+        import json
+
+        root = Path(__file__).resolve().parent.parent  # repo root
+        compiled = root / "compiled"
+
+        allow_path = compiled / "tech_allowlist.txt"
+        alias_path = compiled / "tech_aliases.json"
+
+        canon_by_key: dict[str, str] = {}
+        alias_to_canon: dict[str, str] = {}
+
+        if allow_path.exists():
+            for line in allow_path.read_text(encoding="utf-8").splitlines():
+                v = (line or "").strip()
+                if not v:
+                    continue
+                canon_by_key[_norm_key(v)] = v
+
+        if alias_path.exists():
+            data = json.loads(alias_path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                for a, c in data.items():
+                    if not a or not c:
+                        continue
+                    alias_to_canon[_norm_key(str(a))] = str(c).strip()
+
+        enabled = len(canon_by_key) >= 200  # “big enough” safety threshold
+        cached = (enabled, canon_by_key, alias_to_canon)
+    except Exception:
+        cached = (False, {}, {})
+
+    setattr(_load_compiled_tech_allowlists, "_cache", cached)
+    return cached
+
+
 # --- Projects extraction ------------------------------------------------------
 
 import re
@@ -3963,7 +4146,9 @@ _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 _MD_LINK_RE = re.compile(r"\[[^\]]+\]\((https?://[^)]+)\)", re.IGNORECASE)
 _BULLET_RE = re.compile(r"^\s*[-•*]\s+")
 _ROLE_RE = re.compile(r"^(role|position)\s*[:\-]\s*(.+)$", re.IGNORECASE)
-_TECH_RE = re.compile(r"^(tech|stack|tools|technologies)\s*[:\-]\s*(.+)$", re.IGNORECASE)
+_TECH_RE = re.compile(
+    r"^(tech|stack|tools|technologies)\s*[:\-]\s*(.+)$", re.IGNORECASE
+)
 
 # headings to ignore if they appear in the passed lines
 _IGNORE_HEADINGS = {
@@ -4102,7 +4287,9 @@ def _parse_dates_line(line: str) -> dict[str, str | None] | None:
     return {"start": start, "end": end}
 
 
-def _parse_title_role_dates(title_line: str) -> tuple[str, str | None, dict[str, str | None]]:
+def _parse_title_role_dates(
+    title_line: str,
+) -> tuple[str, str | None, dict[str, str | None]]:
     """
     Title line examples:
       - "StockAI — Personal Project (2024-01 to Present)"
@@ -4150,127 +4337,280 @@ def _parse_title_role_dates(title_line: str) -> tuple[str, str | None, dict[str,
     return title, role, dates
 
 
-def extract_projects(lines: list[str] | str) -> list[dict[str, Any]]:
+def extract_projects(lines: list[str]) -> list[dict]:
     """
-    Projects extractor.
-    Output dict keys:
-      - title (str)
-      - role (str)  [we will ensure non-empty by defaulting to "Project" if absent]
-      - tech_stack (list[str])
-      - links (list[str])
-      - dates: {start: str|None, end: str|None}
-      - bullets (list[str])
+    Contract:
+      returns list[dict] with keys:
+        - title (str)
+        - role (str)
+        - tech_stack (list[str])
+        - links (list[str])
+        - dates ({start,end})
+        - bullets (list[str])
     """
-    if isinstance(lines, str):
-        raw_lines = lines.splitlines()
-    else:
-        raw_lines = list(lines)
+    raw = [norm(x) for x in (lines or []) if norm(x)]
+    if not raw:
+        return []
 
-    # If someone accidentally passes an EXPERIENCE section, bail out early.
-    # (Your test passes a list starting with "EXPERIENCE")
-    for ln in raw_lines[:2]:
-        if _norm_space(ln).casefold() in {"experience", "work experience", "professional experience", "employment"}:
-            return []
+    # Only parse if this block is actually Projects (prevents EXPERIENCE false positives)
+    head = raw[0]
+    if not re.match(r"^(projects|selected projects|personal projects|academic projects|side projects|key projects)\b", head, re.I):
+        return []
 
-    # Normalize and keep blanks for block splitting
-    norm = [ln.rstrip("\n") for ln in raw_lines]
+    url_re = re.compile(r"https?://\S+", re.I)
 
-    # Split into blocks by blank lines
-    blocks: list[list[str]] = []
-    cur: list[str] = []
-    for ln in norm:
-        if not ln.strip():
-            if cur:
-                blocks.append(cur)
-                cur = []
+    projects = []
+    current = None
+
+    def flush():
+        nonlocal current
+        if not current:
+            return
+        # final cleanup
+        current["tech_stack"] = _filter_tech_allowlist(current.get("tech_stack") or [])
+        current["links"] = list(dict.fromkeys(current.get("links") or []))
+        current["bullets"] = [b for b in (current.get("bullets") or []) if b.strip()]
+        projects.append(current)
+        current = None
+
+    # Start scanning after heading
+    for line in raw[1:]:
+        # New project header heuristic:
+        # Title — Role (date range)
+        is_header = ("—" in line or " - " in line) and not line.lower().startswith(("tech:", "link:", "links:"))
+        if is_header and (current is None or (current and current.get("title"))):
+            # If we already have a project and see another header, flush
+            if current is not None:
+                flush()
+
+            title = line
+            role = ""
+            dates_txt = ""
+
+            # Pull "(...)" tail if present
+            m_paren = re.search(r"\(([^)]+)\)\s*$", line)
+            if m_paren:
+                dates_txt = m_paren.group(1)
+                title = line[: m_paren.start()].strip()
+
+            # Split on em dash first, then " - "
+            if "—" in title:
+                parts = [p.strip() for p in title.split("—", 1)]
+            else:
+                parts = [p.strip() for p in title.split(" - ", 1)] if " - " in title else [title.strip()]
+
+            if len(parts) == 2:
+                title, role = parts[0], parts[1]
+            else:
+                title = parts[0]
+                role = "Project"  # must be non-empty for your contract/tests
+
+            start, end, _months = (None, None, None)
+            if dates_txt:
+                start, end, _months = parse_date_range(dates_txt)
+
+            current = {
+                "title": title.strip(),
+                "role": role.strip() or "Project",
+                "tech_stack": [],
+                "links": [],
+                "dates": {"start": start, "end": end},
+                "bullets": [],
+            }
             continue
-        cur.append(_norm_space(ln))
-    if cur:
-        blocks.append(cur)
 
-    projects: list[dict[str, Any]] = []
-
-    for block in blocks:
-        if not block:
+        # If we haven't hit a header yet, ignore noise
+        if current is None:
             continue
 
-        # Drop heading-only lines from the start of the block
-        block2 = [ln for ln in block if not _is_heading_line(ln)]
-        if not block2:
+        # Tech line
+        mtech = TECH_LINE_RE.match(line)
+        if mtech:
+            tech_blob = mtech.group(2)
+            toks = _split_simple_tokens(tech_blob)
+            current["tech_stack"].extend(toks)
             continue
 
-        # Disambiguation: if the first real line looks like a job title + company, skip this block
-        if _looks_like_experience_title(block2[0]):
+        # Link line OR bare URLs anywhere
+        if re.match(r"^(link|links)\s*:\s*", line, re.I):
+            urls = url_re.findall(line)
+            current["links"].extend(urls)
             continue
 
-        item: dict[str, Any] = {
-            "title": "",
-            "role": None,
-            "tech_stack": [],
-            "links": [],
-            "dates": {"start": None, "end": None},
-            "bullets": [],
-        }
+        urls = url_re.findall(line)
+        if urls:
+            current["links"].extend(urls)
 
-        # links anywhere
-        all_links: list[str] = []
-        for ln in block2:
-            all_links.extend(_collect_links(ln))
-        item["links"] = list(dict.fromkeys(all_links))
+        # Otherwise treat as bullet/description
+        current["bullets"].append(BULLET.sub("", line).strip())
 
-        # parse block
-        title_line: str | None = None
-
-        for ln in block2:
-            if _is_bullet(ln):
-                b = _strip_bullet(ln)
-                if b:
-                    item["bullets"].append(b)
-                continue
-
-            m = _ROLE_RE.match(ln)
-            if m:
-                item["role"] = _norm_space(m.group(2))
-                continue
-
-            m = _TECH_RE.match(ln)
-            if m:
-                for t in _split_tokens(m.group(2)):
-                    canon = _canonical_tech(t)
-                    if canon:
-                        item["tech_stack"].append(canon)
-                continue
-
-            d = _parse_dates_line(ln)
-            if d and (d.get("start") or d.get("end")):
-                item["dates"] = d
-                continue
-
-            if title_line is None and not _is_heading_line(ln):
-                title_line = ln
-
-        if title_line:
-            title, role_from_title, dates_from_title = _parse_title_role_dates(title_line)
-            item["title"] = title
-            if item["role"] is None and role_from_title:
-                item["role"] = role_from_title
-            # only set dates from title if we didn't already find better dates
-            if (not item["dates"].get("start") and not item["dates"].get("end")) and (
-                dates_from_title.get("start") or dates_from_title.get("end")
-            ):
-                item["dates"] = dates_from_title
-
-        # ensure role exists (your contract expects it)
-        if not item["role"]:
-            item["role"] = "Project"
-
-        # de-dupe tech_stack
-        item["tech_stack"] = list(dict.fromkeys([t for t in item["tech_stack"] if t]))
-
-        if item["title"]:
-            projects.append(item)
-
+    flush()
     return projects
+
+
+def _split_simple_tokens(s: str) -> list[str]:
+    # Split common “tech stack” separators: commas, pipes, slashes, bullets
+    parts = re.split(r"[,\|/;•·]+", s or "")
+    out = []
+    for p in parts:
+        p = (p or "").strip()
+        if not p:
+            continue
+        # remove trailing punctuation
+        p = re.sub(r"[.\s]+$", "", p).strip()
+        if p:
+            out.append(p)
+    return out
+
+
+_TECH_ALLOW_CACHE = None
+_SKILLS_ALLOW_CACHE = None
+
+
+def _load_allowlist_pair(allowlist_name: str, aliases_name: str, min_size: int = 500):
+    """
+    Loads compiled/<allowlist_name> + compiled/<aliases_name>.
+    Supports either:
+      - allowlist as a LIST of canonical strings, or
+      - allowlist as a DICT {normalized_key: canonical}
+    aliases should be a DICT {alias_key: canonical}
+    """
+    compiled_dir = Path(__file__).resolve().parents[1] / "compiled"
+    allow_path = compiled_dir / allowlist_name
+    alias_path = compiled_dir / aliases_name
+
+    if not allow_path.exists():
+        return False, {}, {}
+
+    try:
+        allow_obj = json.loads(allow_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False, {}, {}
+
+    alias_obj = {}
+    if alias_path.exists():
+        try:
+            alias_obj = json.loads(alias_path.read_text(encoding="utf-8"))
+        except Exception:
+            alias_obj = {}
+
+    canon_by_key = {}
+    if isinstance(allow_obj, dict):
+        canon_by_key = {str(k): str(v) for k, v in allow_obj.items()}
+    elif isinstance(allow_obj, list):
+        canon_by_key = {_norm_key(v): str(v) for v in allow_obj if str(v).strip()}
+    else:
+        canon_by_key = {}
+
+    alias_to_canon = {}
+    if isinstance(alias_obj, dict):
+        for k, v in alias_obj.items():
+            kk = _norm_key(str(k))
+            vv = str(v).strip()
+            if kk and vv:
+                alias_to_canon[kk] = vv
+
+    enabled = len(canon_by_key) >= min_size
+    return enabled, canon_by_key, alias_to_canon
+
+
+def _load_compiled_tech_allowlists():
+    global _TECH_ALLOW_CACHE
+    if _TECH_ALLOW_CACHE is not None:
+        return _TECH_ALLOW_CACHE
+
+    # Your build step produced these:
+    enabled, canon_by_key, alias_to_canon = _load_allowlist_pair(
+        "tech_allowlist.json",
+        "tech_aliases.json",
+        min_size=500,
+    )
+    _TECH_ALLOW_CACHE = (enabled, canon_by_key, alias_to_canon)
+    return _TECH_ALLOW_CACHE
+
+
+def _load_compiled_skills_allowlists():
+    global _SKILLS_ALLOW_CACHE
+    if _SKILLS_ALLOW_CACHE is not None:
+        return _SKILLS_ALLOW_CACHE
+
+    enabled, canon_by_key, alias_to_canon = _load_allowlist_pair(
+        "skills_allowlist.json",
+        "skills_aliases.json",
+        min_size=500,
+    )
+    _SKILLS_ALLOW_CACHE = (enabled, canon_by_key, alias_to_canon)
+    return _SKILLS_ALLOW_CACHE
+
+
+def _pretty_label(label: str) -> str:
+    """
+    Make dataset labels nicer for UI/tests.
+    Examples:
+      - 'Python (computer programming)' -> 'Python'
+      - 'Structured Query Language (SQL)' -> 'SQL'
+    """
+    s = (label or "").strip()
+    if not s:
+        return s
+
+    m = re.match(r"^(.*?)\s*\(([^)]+)\)\s*$", s)
+    if not m:
+        return s
+
+    left = (m.group(1) or "").strip()
+    inside = (m.group(2) or "").strip()
+
+    # If parentheses look like an acronym, prefer it.
+    if re.fullmatch(r"[A-Z0-9+.#-]{2,10}", inside or ""):
+        return inside
+
+    return left or s
+
+
+def _filter_tech_allowlist(tokens: list[str]) -> list[str]:
+    """
+    Allowlist-only when datasets exist.
+    Uses: tech allowlist first, then skills allowlist as fallback (bigger coverage).
+    """
+    tech_enabled, tech_canon_by_key, tech_alias = _load_compiled_tech_allowlists()
+    skills_enabled, skills_canon_by_key, skills_alias = (
+        _load_compiled_skills_allowlists()
+    )
+
+    allow_enabled = tech_enabled or skills_enabled
+
+    found = []
+    seen = set()
+
+    for tok in tokens or []:
+        tok = (tok or "").strip()
+        if not tok:
+            continue
+
+        key = _norm_key(tok)
+
+        canon = None
+        if tech_enabled:
+            canon = tech_alias.get(key) or tech_canon_by_key.get(key)
+
+        if canon is None and skills_enabled:
+            canon = skills_alias.get(key) or skills_canon_by_key.get(key)
+
+        if allow_enabled:
+            if not canon:
+                continue
+            canon = _pretty_label(canon)
+        else:
+            # No datasets available -> keep tokens (dev-friendly)
+            canon = tok
+
+        ck = canon.casefold()
+        if ck not in seen:
+            seen.add(ck)
+            found.append(canon)
+
+    return found
 
 
 ================================================================================
@@ -40960,6 +41300,28 @@ Software Developer at Example Inc
 
 
 ================================================================================
+// Path: tests/test_experience_tech_allowlist.py
+================================================================================
+
+from ats_parser.rules import fallback_experience
+
+
+def test_experience_technologies_must_be_allowlist_only():
+    text = """
+2020 - 2021
+Software Developer at Example Inc
+Tech: Python, SQL, FooBarTech
+- Built APIs
+"""
+    items = fallback_experience(text)
+    assert len(items) >= 1
+    tech = items[0].get("technologies") or []
+    assert "Python" in tech
+    assert "SQL" in tech
+    assert "FooBarTech" not in tech
+
+
+================================================================================
 // Path: tests/test_parser_pipeline_contract.py
 ================================================================================
 
@@ -41058,6 +41420,30 @@ def test_word_project_in_job_title_is_experience_not_project():
 
     projects = rules.extract_projects(experience_lines)
     assert projects == []
+
+
+================================================================================
+// Path: tests/test_projects_tech_allowlist.py
+================================================================================
+
+from ats_parser import rules
+
+
+def test_projects_tech_stack_must_be_allowlist_only():
+    lines = [
+        "PROJECTS",
+        "StockAI — Personal Project (2024-01 to Present)",
+        "Tech: Python, Pandas, NumPy, FooBarTech, BazQuxFramework",
+        "Link: https://github.com/example/stockai",
+    ]
+    projects = rules.extract_projects(lines)
+    assert projects and isinstance(projects, list)
+    tech = projects[0].get("tech_stack") or []
+    # allowlisted
+    assert "Python" in tech
+    # not allowlisted
+    assert "FooBarTech" not in tech
+    assert "BazQuxFramework" not in tech
 
 
 ================================================================================
@@ -41510,4 +41896,4 @@ if __name__ == "__main__":
 
 
 
-// Summary: wrote 49 files, skipped 56194 files.
+// Summary: wrote 51 files, skipped 56212 files.

@@ -1,18 +1,21 @@
-# Web app
+# --- Web (Flask app) ---
 Flask>=3.0.3
+Werkzeug>=3.0.3
 gunicorn
 
-# PDF parsing
+# --- PDF parsing ---
 PyMuPDF>=1.24
 pdfplumber>=0.11
 
-# ATS parser core
-pydantic[email]>=2.7
+# --- Parsing helpers used by ats_parser ---
+regex>=2024.9.11
+python-dateutil>=2.9.0.post0
 phonenumbers>=8.13.44
-dateparser>=1.2
-rapidfuzz>=3.9
-requests>=2.32
 filetype>=1.2.0
 
-# DOCX support (you already have .docx code path in resume_parser.py)
+pydantic[email]>=2.7
+rapidfuzz>=3.9
+langdetect>=1.0.9
+requests>=2.32
+dateparser>=1.2
 python-docx>=1.1
