@@ -5173,8 +5173,8 @@ Maximal Software MPL Modeling System
 Maximizer Software Maximizer Enterprise
 Maxon BodyPaint 3D
 Maxon Cinema 4D
-MaxScript
 MAXScript
+MaxScript
 MaxSea Time Zero Navigator NOAA
 MaxSea TIMEZERO
 Maxwell Systems American Contractor
@@ -7664,8 +7664,8 @@ Scientific Software International TESTFACT
 Sciforma
 SciGraphica
 Scikit-learn
-Scilab
 SciLab
+Scilab
 SciPy
 SciQuest PE TurboChrom
 Scott Systems MaxxTraxx Pro
