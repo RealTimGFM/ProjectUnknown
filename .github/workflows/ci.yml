@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: ["main"]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -59,9 +63,9 @@ jobs:
                   "Missing compiled allowlists. Expected these files in either "
                   "'compiled/' or 'data/allowlists/compiled/'. Missing:\n- "
                   + "\n- ".join(sorted(set(missing)))
-                  + "\n\nIf you intended to rebuild them locally, run:\n"
+                  + "\n\nFix: run locally then commit outputs:\n"
                   "  python -m tools.build_allowlists\n"
-                  "(requires raw datasets under data/allowlists/raw/.)"
+                  "(raw datasets must exist locally under data/allowlists/raw/.)"
               )
 
           print(f"OK: compiled allowlists present in: {found_base}")

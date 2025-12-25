@@ -2,7 +2,7 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-12-25T03:59:52Z
+Generated: 2025-12-25T21:46:05Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -67,6 +67,7 @@ ProjectUnknown/
 │       │   │   └── languages.yml
 │       │   └── onet/
 │       │       └── 31_technology_skills.sql
+│       ├── README.md
 │       └── SOURCES.md
 ├── templates/
 │   ├── _flash.html
@@ -110,7 +111,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 18  Files: 80
+Directories: 18  Files: 81
 
 ================================================================================
 FILE CONTENTS
@@ -966,7 +967,7 @@ if __name__ == "__main__":
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-12-25T03:59:52Z
+Generated: 2025-12-25T21:46:05Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -1031,6 +1032,7 @@ ProjectUnknown/
 │       │   │   └── languages.yml
 │       │   └── onet/
 │       │       └── 31_technology_skills.sql
+│       ├── README.md
 │       └── SOURCES.md
 ├── templates/
 │   ├── _flash.html
@@ -1074,7 +1076,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 18  Files: 80
+Directories: 18  Files: 81
 
 ================================================================================
 FILE CONTENTS
@@ -2334,9 +2336,14 @@ on:
   pull_request:
     branches: ["main"]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -2344,7 +2351,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.12"
           cache: "pip"
 
       - name: Install dependencies (CI)
@@ -2352,15 +2359,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
 
-      # Optional but recommended if your compiled allowlists are NOT committed
-      # (safe to keep even if they are committed)
       - name: Verify compiled allowlists exist
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          # Accept either location (depending on your repo layout)
           candidates = [
               Path("compiled"),
               Path("data/allowlists/compiled"),
@@ -2389,14 +2393,13 @@ jobs:
                   "Missing compiled allowlists. Expected these files in either "
                   "'compiled/' or 'data/allowlists/compiled/'. Missing:\n- "
                   + "\n- ".join(sorted(set(missing)))
-                  + "\n\nIf you intended to rebuild them locally, run:\n"
+                  + "\n\nFix: run locally then commit outputs:\n"
                   "  python -m tools.build_allowlists\n"
-                  "(requires raw datasets under data/allowlists/raw/...)"
+                  "(raw datasets must exist locally under data/allowlists/raw/.)"
               )
 
           print(f"OK: compiled allowlists present in: {found_base}")
           PY
-
 
       - name: Run tests
         run: |
@@ -2407,21 +2410,44 @@ jobs:
 // Path: .github/workflows/dependency-review.yml
 ================================================================================
 
-name: Deploy to Render
+name: Dependency Review
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  pull_request:
 
 permissions:
   contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+
+
+================================================================================
+// Path: .github/workflows/deploy-render.yml
+================================================================================
+
+name: Deploy to Render
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: ["main"]
 
 jobs:
   deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Render deploy hook (skip if secret missing)
+      - name: Trigger Render Deploy Hook
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
@@ -2429,47 +2455,7 @@ jobs:
             echo "Skipping deploy: missing secret RENDER_DEPLOY_HOOK_URL"
             exit 0
           fi
-
-          curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL"
-          echo "Render deploy triggered."
-
-
-================================================================================
-// Path: .github/workflows/deploy-render.yml
-================================================================================
-
-name: Deploy to Render (after CI)
-
-on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-jobs:
-  deploy:
-    # Auto-deploy only when CI succeeded on main
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'main')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Render deploy hook
-        env:
-          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-        run: |
-          if [ -z "${RENDER_DEPLOY_HOOK_URL:-}" ]; then
-            echo "Missing secret: RENDER_DEPLOY_HOOK_URL"
-            echo "Add it in GitHub: Settings -> Secrets and variables -> Actions"
-            exit 1
-          fi
-
-          curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL"
-          echo "Render deploy triggered."
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"
 
 
 ================================================================================
@@ -4915,6 +4901,41 @@ def split_sections(text: str) -> Dict[str, Any]:
         out[lower] = "\n".join(buckets.get(upper, [])).strip()
 
     return out
+
+
+================================================================================
+// Path: data/allowlists/README.md
+================================================================================
+
+# Allowlists layout
+
+This project separates **raw source datasets** (local-only) from **compiled artifacts** (tracked in git).
+
+## Folders
+
+- `data/allowlists/raw/`
+  - Local-only inputs (large SQL/CSV/YAML)
+  - Must be gitignored
+  - Used only when running `python -m tools.build_allowlists`
+
+- `data/allowlists/compiled/` (or `compiled/` depending on your repo)
+  - Small, runtime-friendly JSON allowlists + alias maps
+  - Committed to git
+  - Used by the parser in “allowlist-only mode” (no unknown tech/skills)
+
+## Policy
+
+- CI must **never** require raw datasets.
+- Runtime must work using compiled artifacts only.
+- If aliases are ambiguous, they should be excluded from auto-mapping and recorded in:
+  - `compiled/skills_alias_conflicts.json`
+
+## Rebuild (local)
+
+1) Put raw inputs into `data/allowlists/raw/...`
+2) Run `python -m tools.build_allowlists`
+3) Commit compiled outputs
+4) Run `pytest`
 
 
 ================================================================================
@@ -42072,4 +42093,4 @@ if __name__ == "__main__":
 
 
 
-// Summary: wrote 51 files, skipped 56248 files.
+// Summary: wrote 52 files, skipped 56260 files.
