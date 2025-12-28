@@ -14,7 +14,11 @@ SECTION_PATTERNS: Tuple[Tuple[str, re.Pattern], ...] = (
     ),
     (
         "SKILLS",
-        re.compile(r"(?i)^(skills|technical\s+skills|core\s+skills|key\s+skills)\b"),
+        re.compile(
+            r"(?i)^(skills|technical\s+skills|core\s+skills|key\s+skills|"
+            r"tech(?:nical)?\s+skills|tech(?:nical)?\s+stack|tech\s+stack|"
+            r"technical\s+stack|technologies|tools|tooling)\b"
+        ),
     ),
     (
         "EXPERIENCE",
@@ -101,7 +105,10 @@ def split_sections(text: str) -> Dict[str, Any]:
             tail = _match_heading(line, pat)
             if tail is None:
                 continue
-
+            # Prevent SKILLS category lines like "Languages: ..." from switching sections.
+            # Example: "Languages: Python, SQL" is often a SKILLS subcategory, not a LANGUAGES section.
+            if current == "SKILLS" and key in {"LANGUAGES", "CERTS"} and tail:
+                continue
             current = key
             switched = True
             if tail:

@@ -1,5 +1,31 @@
-
 from __future__ import annotations
+import importlib
+from functools import lru_cache
+from typing import Tuple
+
+# Robust PyMuPDF import:
+# Some environments accidentally install the PyPI package named "fitz" (NOT PyMuPDF),
+# which can shadow PyMuPDF's expected API in some setups.
+try:
+    import fitz  # PyMuPDF typically exposes this name
+except Exception:  # pragma: no cover
+    fitz = None
+
+if fitz is None or not hasattr(fitz, "open"):
+    try:
+        import pymupdf as fitz  # fallback for some versions
+    except Exception:  # pragma: no cover
+        fitz = None
+
+if fitz is None or not hasattr(fitz, "open"):
+    raise ImportError(
+        "PyMuPDF is required. If you installed the wrong 'fitz' package, run:\n"
+        "  pip uninstall fitz -y\n"
+        "  pip install PyMuPDF"
+    )
+
+# keep the rest of your existing imports below (re, os, pdfplumber, etc.)
+
 import os, re, unicodedata
 from typing import Tuple
 import fitz  # PyMuPDF
@@ -7,6 +33,26 @@ import pdfplumber
 
 USE_OCR = os.getenv("USE_OCR", "0") == "1"
 OCR_LANGS = (os.getenv("OCR_LANGS", "en").split(","))
+@lru_cache(maxsize=1)
+def _get_mupdf():
+    # Prefer modern PyMuPDF import if available
+    try:
+        mupdf = importlib.import_module("pymupdf")
+        if hasattr(mupdf, "open"):
+            return mupdf
+    except Exception:
+        pass
+
+    # Fallback: classic import name
+    try:
+        fitz = importlib.import_module("fitz")
+        if hasattr(fitz, "open"):
+            return fitz
+    except Exception:
+        pass
+
+    raise ImportError("PyMuPDF is not installed. Install 'PyMuPDF' to enable PDF parsing.")
+
 
 def _norm_ws(s: str) -> str:
     if not s:
@@ -38,6 +84,7 @@ def _get_ocr():
 
 def read_pdf_text(path: str) -> Tuple[str, int]:
     """Return (text, ocr_pages_used). Uses blocks; falls back to text/ocr/pdfplumber."""
+    fitz = _get_mupdf()
     doc = fitz.open(path)
     assembled, ocr_count = [], 0
     for i, page in enumerate(doc):

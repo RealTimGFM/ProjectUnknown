@@ -2,7 +2,7 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-12-25T21:46:05Z
+Generated: 2025-12-27T03:39:29Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -26,6 +26,8 @@ ProjectUnknown/
 │   └── README.md
 ├── ats_parser/
 │   ├── __init__.py
+│   ├── allowlists.py
+│   ├── debug.py
 │   ├── ingest.py
 │   ├── llm.py
 │   ├── models.py
@@ -82,6 +84,8 @@ ProjectUnknown/
 │   ├── auth_signup.html
 │   └── index.html
 ├── tests/
+│   ├── fixtures/
+│   │   └── quy_cv_en_sanitized.txt
 │   ├── conftest.py
 │   ├── test_contacts_extract.py
 │   ├── test_dates_parse.py
@@ -91,6 +95,8 @@ ProjectUnknown/
 │   ├── test_parser_pipeline_contract.py
 │   ├── test_projects_contract.py
 │   ├── test_projects_tech_allowlist.py
+│   ├── test_regression_quy_cv.py
+│   ├── test_regression_quy_cv_pdf.py
 │   ├── test_resume_parser_entrypoint.py
 │   ├── test_sections_split.py
 │   ├── test_skills_extract.py
@@ -98,6 +104,7 @@ ProjectUnknown/
 ├── tools/
 │   └── build_allowlists.py
 ├── uploads/
+│   └── 1_QuyVuLuong_CV_EN.pdf
 ├── .gitattributes
 ├── .gitignore
 ├── backend.py
@@ -111,7 +118,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 18  Files: 81
+Directories: 19  Files: 87
 
 ================================================================================
 FILE CONTENTS
@@ -967,7 +974,7 @@ if __name__ == "__main__":
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-12-25T21:46:05Z
+Generated: 2025-12-27T03:39:29Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -991,6 +998,8 @@ ProjectUnknown/
 │   └── README.md
 ├── ats_parser/
 │   ├── __init__.py
+│   ├── allowlists.py
+│   ├── debug.py
 │   ├── ingest.py
 │   ├── llm.py
 │   ├── models.py
@@ -1047,6 +1056,8 @@ ProjectUnknown/
 │   ├── auth_signup.html
 │   └── index.html
 ├── tests/
+│   ├── fixtures/
+│   │   └── quy_cv_en_sanitized.txt
 │   ├── conftest.py
 │   ├── test_contacts_extract.py
 │   ├── test_dates_parse.py
@@ -1056,6 +1067,8 @@ ProjectUnknown/
 │   ├── test_parser_pipeline_contract.py
 │   ├── test_projects_contract.py
 │   ├── test_projects_tech_allowlist.py
+│   ├── test_regression_quy_cv.py
+│   ├── test_regression_quy_cv_pdf.py
 │   ├── test_resume_parser_entrypoint.py
 │   ├── test_sections_split.py
 │   ├── test_skills_extract.py
@@ -1063,6 +1076,7 @@ ProjectUnknown/
 ├── tools/
 │   └── build_allowlists.py
 ├── uploads/
+│   └── 1_QuyVuLuong_CV_EN.pdf
 ├── .gitattributes
 ├── .gitignore
 ├── backend.py
@@ -1076,7 +1090,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 18  Files: 81
+Directories: 19  Files: 87
 
 ================================================================================
 FILE CONTENTS
@@ -2198,6 +2212,12 @@ if __name__ == "__main__":
 testpaths = tests
 xfail_strict = true
 pythonpath = .
+markers =
+    slow: PDF/OCR integration tests (optional)
+filterwarnings =
+    ignore:builtin type SwigPyPacked has no __module__ attribute:DeprecationWarning
+    ignore:builtin type SwigPyObject has no __module__ attribute:DeprecationWarning
+    ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning
 
 
 ================================================================================
@@ -2479,14 +2499,318 @@ See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more inf
 
 """Hybrid resume parser package (rules + optional LLM)."""
 from .parser import parse_file, parse_bytes, adapt_for_backend
+from .debug import debug_parse_text
+
+================================================================================
+// Path: ats_parser/allowlists.py
+================================================================================
+
+# ats_parser/allowlists.py
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+
+# Cache so we only hit disk once per process.
+_CACHE: tuple[list[str] | None, dict[str, str], list[str] | None, dict[str, str]] | None = None
+
+
+def _repo_root() -> Path:
+    # ats_parser/allowlists.py -> ats_parser -> repo root
+    return Path(__file__).resolve().parents[1]
+
+
+def _find_compiled_dir() -> Path | None:
+    """
+    Locate the compiled allowlists directory.
+
+    Supported layouts:
+      - <repo>/data/allowlists/compiled
+      - <repo>/compiled
+
+    Optional override:
+      - env ATS_ALLOWLISTS_DIR=/absolute/or/relative/path
+    """
+    override = (os.getenv("ATS_ALLOWLISTS_DIR") or "").strip()
+    if override:
+        p = Path(override).expanduser().resolve()
+        if p.is_dir():
+            return p
+
+    root = _repo_root()
+    candidates = [
+        root / "data" / "allowlists" / "compiled",
+        root / "compiled",
+    ]
+    for c in candidates:
+        if c.is_dir():
+            return c
+
+    return None
+
+
+def _read_txt_lines(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        s = (raw or "").strip()
+        if not s or s.startswith("#"):
+            continue
+        k = s.casefold()
+        if k not in seen:
+            seen.add(k)
+            out.append(s)
+    return out
+
+
+def _read_json(path: Path) -> Any:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        return None
+
+
+def load_allowlists() -> tuple[list[str] | None, dict[str, str], list[str] | None, dict[str, str]]:
+    """
+    Returns:
+      (TECH_ALLOWLIST, TECH_ALIASES, SKILLS_ALLOWLIST, SKILLS_ALIASES)
+
+    If compiled allowlists are missing, TECH_ALLOWLIST/SKILLS_ALLOWLIST will be None
+    (so callers can fall back to permissive parsing).
+    """
+    global _CACHE
+    if _CACHE is not None:
+        return _CACHE
+
+    compiled = _find_compiled_dir()
+    if not compiled:
+        _CACHE = (None, {}, None, {})
+        return _CACHE
+
+    tech_allow = _read_txt_lines(compiled / "tech_allowlist.txt")
+    tech_aliases_raw = _read_json(compiled / "tech_aliases.json")
+
+    skills_allow = _read_txt_lines(compiled / "skills_allowlist.txt")
+    skills_aliases_raw = _read_json(compiled / "skills_aliases.json")
+
+    tech_aliases: dict[str, str] = {}
+    if isinstance(tech_aliases_raw, dict):
+        for k, v in tech_aliases_raw.items():
+            kk = (k or "").strip()
+            vv = (v or "").strip()
+            if kk and vv:
+                tech_aliases[kk.casefold()] = vv
+
+    skills_aliases: dict[str, str] = {}
+    if isinstance(skills_aliases_raw, dict):
+        for k, v in skills_aliases_raw.items():
+            kk = (k or "").strip()
+            vv = (v or "").strip()
+            if kk and vv:
+                skills_aliases[kk.casefold()] = vv
+
+    TECH_ALLOWLIST = tech_allow if tech_allow else None
+    SKILLS_ALLOWLIST = skills_allow if skills_allow else None
+
+    _CACHE = (TECH_ALLOWLIST, tech_aliases, SKILLS_ALLOWLIST, skills_aliases)
+    return _CACHE
+
+
+# Export module-level constants (what your rules.py optional import expects).
+TECH_ALLOWLIST, TECH_ALIASES, SKILLS_ALLOWLIST, SKILLS_ALIASES = load_allowlists()
+
+__all__ = [
+    "TECH_ALLOWLIST",
+    "TECH_ALIASES",
+    "SKILLS_ALLOWLIST",
+    "SKILLS_ALIASES",
+    "load_allowlists",
+]
+
+
+================================================================================
+// Path: ats_parser/debug.py
+================================================================================
+
+from __future__ import annotations
+
+from dataclasses import asdict
+from typing import Any, Dict, List, Optional
+
+from .parser import parse_text
+from .sections import split_sections
+
+
+def _preview_lines(lines: List[str], max_lines: int = 6) -> List[str]:
+    out: List[str] = []
+    for s in lines:
+        s = (s or "").strip()
+        if s:
+            out.append(s)
+        if len(out) >= max_lines:
+            break
+    return out
+
+
+def debug_parse_text(
+    text: str,
+    *,
+    section_preview_lines: int = 6,
+    section_max_chars: int = 400,
+) -> Dict[str, Any]:
+    """
+    Return a deterministic debug snapshot for a resume parse.
+
+    - Does NOT print (caller decides).
+    - Safe to call from tests/scripts/routes.
+    - Uses the same parsing entrypoint as production (parse_text).
+
+    Returns a dict with:
+      - section keys + short previews
+      - counts (skills/experience/projects/education)
+      - experience summaries (title/company/location/dates/bullets/tech)
+      - warnings/flags (if present on Resume model)
+    """
+    secs = split_sections(text)
+    resume = parse_text(text)
+
+    # Sections snapshot
+    sections_out: Dict[str, Any] = {}
+    for key, lines in secs.items():
+        preview = _preview_lines(lines, max_lines=section_preview_lines)
+        joined = "\n".join(preview)
+        if len(joined) > section_max_chars:
+            joined = joined[:section_max_chars].rstrip() + "…"
+        sections_out[key] = {
+            "line_count": len(lines),
+            "preview": joined,
+        }
+
+    # Experience snapshot
+    exp_out: List[Dict[str, Any]] = []
+    for e in resume.experience or []:
+        # tolerate model differences across versions (dates may be nested)
+        dates = getattr(e, "dates", None)
+        exp_out.append(
+            {
+                "title": getattr(e, "title", "") or "",
+                "company": getattr(e, "company", "") or "",
+                "location": getattr(e, "location", "") or "",
+                "start": getattr(dates, "start", None) if dates else None,
+                "end": getattr(dates, "end", None) if dates else None,
+                "months": getattr(dates, "months", None) if dates else None,
+                "bullets_count": len(getattr(e, "bullets", []) or []),
+                "bullets_preview": (getattr(e, "bullets", []) or [])[:3],
+                "technologies_count": len(getattr(e, "technologies", []) or []),
+                "technologies_preview": (getattr(e, "technologies", []) or [])[:10],
+            }
+        )
+
+    # Projects snapshot (if present)
+    projects = getattr(resume, "projects", None) or []
+    proj_out: List[Dict[str, Any]] = []
+    for p in projects:
+        proj_out.append(
+            {
+                "name": getattr(p, "name", "") or "",
+                "role": getattr(p, "role", "") or "",
+                "technologies_count": len(getattr(p, "technologies", []) or []),
+                "technologies_preview": (getattr(p, "technologies", []) or [])[:10],
+                "bullets_count": len(getattr(p, "bullets", []) or []),
+                "bullets_preview": (getattr(p, "bullets", []) or [])[:3],
+            }
+        )
+
+    # Education snapshot (if present)
+    education = getattr(resume, "education", None) or []
+    edu_out: List[Dict[str, Any]] = []
+    for ed in education:
+        edu_out.append(
+            {
+                "school": getattr(ed, "school", "") or "",
+                "degree": getattr(ed, "degree", "") or "",
+                "start": getattr(ed, "start", None),
+                "end": getattr(ed, "end", None),
+            }
+        )
+
+    # Flags/warnings snapshot (if present)
+    flags = getattr(resume, "flags", None)
+    flags_out: Optional[Dict[str, Any]] = None
+    if flags is not None:
+        # flags might be a pydantic model or dataclass; try both
+        try:
+            flags_out = flags.model_dump()  # pydantic v2
+        except Exception:
+            try:
+                flags_out = flags.dict()  # pydantic v1
+            except Exception:
+                try:
+                    flags_out = asdict(flags)  # dataclass
+                except Exception:
+                    flags_out = {"raw": str(flags)}
+
+    return {
+        "sections": sections_out,
+        "contact": {
+            "name": getattr(getattr(resume, "contact", None), "name", "") or "",
+            "email": getattr(getattr(resume, "contact", None), "email", "") or "",
+            "phone": getattr(getattr(resume, "contact", None), "phone", "") or "",
+            "links": getattr(getattr(resume, "contact", None), "links", []) or [],
+        },
+        "counts": {
+            "skills": len(getattr(resume, "skills", []) or []),
+            "experience": len(resume.experience or []),
+            "projects": len(projects),
+            "education": len(education),
+        },
+        "skills_preview": (getattr(resume, "skills", []) or [])[:25],
+        "experience": exp_out,
+        "projects": proj_out,
+        "education": edu_out,
+        "flags": flags_out,
+    }
 
 
 ================================================================================
 // Path: ats_parser/ingest.py
 ================================================================================
 
-
 from __future__ import annotations
+import importlib
+from functools import lru_cache
+from typing import Tuple
+
+# Robust PyMuPDF import:
+# Some environments accidentally install the PyPI package named "fitz" (NOT PyMuPDF),
+# which can shadow PyMuPDF's expected API in some setups.
+try:
+    import fitz  # PyMuPDF typically exposes this name
+except Exception:  # pragma: no cover
+    fitz = None
+
+if fitz is None or not hasattr(fitz, "open"):
+    try:
+        import pymupdf as fitz  # fallback for some versions
+    except Exception:  # pragma: no cover
+        fitz = None
+
+if fitz is None or not hasattr(fitz, "open"):
+    raise ImportError(
+        "PyMuPDF is required. If you installed the wrong 'fitz' package, run:\n"
+        "  pip uninstall fitz -y\n"
+        "  pip install PyMuPDF"
+    )
+
+# keep the rest of your existing imports below (re, os, pdfplumber, etc.)
+
 import os, re, unicodedata
 from typing import Tuple
 import fitz  # PyMuPDF
@@ -2494,6 +2818,26 @@ import pdfplumber
 
 USE_OCR = os.getenv("USE_OCR", "0") == "1"
 OCR_LANGS = (os.getenv("OCR_LANGS", "en").split(","))
+@lru_cache(maxsize=1)
+def _get_mupdf():
+    # Prefer modern PyMuPDF import if available
+    try:
+        mupdf = importlib.import_module("pymupdf")
+        if hasattr(mupdf, "open"):
+            return mupdf
+    except Exception:
+        pass
+
+    # Fallback: classic import name
+    try:
+        fitz = importlib.import_module("fitz")
+        if hasattr(fitz, "open"):
+            return fitz
+    except Exception:
+        pass
+
+    raise ImportError("PyMuPDF is not installed. Install 'PyMuPDF' to enable PDF parsing.")
+
 
 def _norm_ws(s: str) -> str:
     if not s:
@@ -2525,6 +2869,7 @@ def _get_ocr():
 
 def read_pdf_text(path: str) -> Tuple[str, int]:
     """Return (text, ocr_pages_used). Uses blocks; falls back to text/ocr/pdfplumber."""
+    fitz = _get_mupdf()
     doc = fitz.open(path)
     assembled, ocr_count = [], 0
     for i, page in enumerate(doc):
@@ -2815,7 +3160,7 @@ from .ingest import read_pdf_text
 from .sections import split_sections
 from . import rules
 from .llm import extract_experience_llm, extract_education_llm
-from .reconcile import merge_experience
+from .reconcile import merge_experience, postprocess_experience
 
 
 def _split_name(full: str):
@@ -2828,10 +3173,80 @@ def _split_name(full: str):
     if len(parts) == 2:
         return parts[0], "", parts[1]
     return parts[0], " ".join(parts[1:-1]), parts[-1]
+# ats_parser/parser.py
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from .sections import split_sections
+from .rules import (
+    extract_contacts,
+    extract_skills_from_text,
+    fallback_education,
+    fallback_experience,
+    fallback_projects,
+)
+from .models import Resume  # keep your existing imports / model names
 
 
-def parse_file(path: str) -> Resume:
-    text, ocr_pages = read_pdf_text(path)
+# Headings your splitter recognizes (case-sensitive on purpose).
+# This targets the common PDF extraction issue where headings get appended to the prior line.
+_INLINE_HEADINGS = (
+    "SUMMARY",
+    "SKILLS",
+    "EXPERIENCE",
+    "PROJECTS",
+    "EDUCATION",
+    "CERTIFICATIONS",
+    "CERTS",
+    "LANGUAGES",
+)
+
+def _inject_inline_section_breaks(text: str) -> str:
+    """
+    Some PDF extractors concatenate content like:
+        "... structured logging. PROJECTS LachanceCapital.com – ..."
+    This makes split_sections() miss the heading because it only matches at line start.
+    We insert a newline before recognized ALL-CAPS headings when they appear mid-line.
+    """
+    if not text:
+        return text
+
+    for h in _INLINE_HEADINGS:
+        # Insert newline before " <HEADING>" when it is not already at a line start.
+        # Case-sensitive: avoids splitting normal sentence usage like "projects" / "experience".
+        text = re.sub(rf"(?<!\n)(?<=\S)\s+{h}\b", f"\n{h}", text)
+
+    return text
+
+
+def parse_text(text: str) -> Resume:
+    # NEW: normalize inline headings before section splitting
+    text = _inject_inline_section_breaks(text)
+
+    secs = split_sections(text)
+
+    contact = extract_contacts(text)
+
+    skills = extract_skills_from_text("\n".join(secs.get("SKILLS", [])))
+
+    experience_items = fallback_experience(secs.get("EXPERIENCE", []))
+    projects_items = fallback_projects(secs.get("PROJECTS", []))
+    education_items = fallback_education(secs.get("EDUCATION", []))
+
+    # keep the rest of your existing Resume construction code unchanged
+    return Resume(
+        contact=contact,
+        skills=skills,
+        experience=experience_items,
+        projects=projects_items,
+        education=education_items,
+    )
+
+
+def parse_text(text: str, *, ocr_pages: int = 0) -> Resume:
     secs = split_sections(text)
 
     warnings: list[str] = []
@@ -2926,6 +3341,8 @@ def parse_file(path: str) -> Resume:
         warnings.append(f"Experience LLM failed: {type(e).__name__}")
 
     experience = merge_experience(exp_rule, exp_llm)
+    experience = postprocess_experience(experience)
+
 
     # ----- FLAGS -----
     # Only count uppercase buckets (the splitter also returns lowercase string views)
@@ -2959,6 +3376,9 @@ def parse_file(path: str) -> Resume:
     )
     return resume
 
+def parse_file(path: str) -> Resume:
+    text, ocr_pages = read_pdf_text(path)
+    return parse_text(text, ocr_pages=ocr_pages)
 
 def parse_bytes(data: bytes) -> Resume:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -3113,6 +3533,74 @@ def merge_experience(
         if not used[i]:
             out.append(l)
     return out
+# ats_parser/reconcile.py
+
+import re
+from typing import List
+from .models import ExperienceItem
+
+_WS = re.compile(r"\s+")
+
+def _clean_loc(s: str) -> str:
+    s = _WS.sub(" ", (s or "").strip())
+    s = s.replace(" ,", ",").strip(" ,")
+    return s
+
+def postprocess_experience(items: List[ExperienceItem]) -> List[ExperienceItem]:
+    """
+    Conservative normalization step AFTER extraction/merge:
+    - If a company has exactly one known location across extracted items, fill missing locations.
+    - Otherwise, only fill from adjacent roles with the same company (common resume layout).
+    """
+    if not items:
+        return items
+
+    # 1) company -> unique location (only if unambiguous)
+    comp_to_locs: dict[str, set[str]] = {}
+    for it in items:
+        comp = (it.company or "").strip()
+        loc = _clean_loc(it.location or "")
+        if comp and loc:
+            comp_to_locs.setdefault(comp.casefold(), set()).add(loc)
+
+    comp_unique_loc = {
+        comp: next(iter(locs))
+        for comp, locs in comp_to_locs.items()
+        if len(locs) == 1
+    }
+
+    for it in items:
+        if (it.company or "").strip() and not _clean_loc(it.location or ""):
+            key = it.company.strip().casefold()
+            if key in comp_unique_loc:
+                it.location = comp_unique_loc[key]
+
+    # 2) adjacency fallback (only when same company and neighbor has location)
+    for i in range(len(items)):
+        it = items[i]
+        if not (it.company or "").strip():
+            continue
+        if _clean_loc(it.location or ""):
+            continue
+
+        comp_key = it.company.strip().casefold()
+
+        prev_loc = ""
+        if i - 1 >= 0 and (items[i - 1].company or "").strip().casefold() == comp_key:
+            prev_loc = _clean_loc(items[i - 1].location or "")
+
+        next_loc = ""
+        if i + 1 < len(items) and (items[i + 1].company or "").strip().casefold() == comp_key:
+            next_loc = _clean_loc(items[i + 1].location or "")
+
+        # Prefer previous role’s location, otherwise next.
+        it.location = prev_loc or next_loc or it.location
+
+    # final cleanup pass
+    for it in items:
+        it.location = _clean_loc(it.location or "")
+
+    return items
 
 
 ================================================================================
@@ -3126,6 +3614,7 @@ from datetime import datetime
 import phonenumbers
 import json
 from pathlib import Path
+from .allowlists import extract_technologies_from_text
 
 try:
     import dateparser
@@ -3313,6 +3802,23 @@ NEXT_SECTION_HEAD = re.compile(
 
 def norm(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip())
+# In SKILLS parsing, treat "Languages: ..." as a category line (not a section break).
+# We only consider "Languages" a new section when it's effectively standalone (no inline list).
+_LANG_HEAD_ONLY = re.compile(r"^languages?\b\s*[:\-–—]?\s*$", re.I)
+
+def _skills_section_boundary(s: str) -> bool:
+    s = norm(s)
+    if not s:
+        return False
+    if re.match(
+        r"^(experience|work (?:history|experience)|employment|projects?|education|certifications?)\b",
+        s,
+        re.I,
+    ):
+        return True
+    if re.match(r"^languages?\b", s, re.I):
+        return bool(_LANG_HEAD_ONLY.match(s))
+    return False
 
 
 def _looks_like_location(s: str) -> bool:
@@ -3325,7 +3831,7 @@ def _looks_like_location(s: str) -> bool:
     return bool(LOCATION_HINT.search(s))
 
 
-def parse_date_range(s: str):
+def parse_date_range(s: str, *, today=None):
     """
     Handles (English only):
       - '2008 – Present'
@@ -3394,13 +3900,19 @@ def parse_date_range(s: str):
         elif ry:
             e_norm = f"{ry}-01"
 
-    # duration (inclusive) when both YYYY-MM present
+    # duration (inclusive) when start exists
     months = None
     try:
-        if s_norm and e_norm and e_norm != "Present":
+        if s_norm and e_norm:
             ys, ms = map(int, s_norm.split("-"))
-            ye, me = map(int, e_norm.split("-"))
+            if e_norm == "Present":
+                t = today or datetime.today()
+                ye, me = int(t.year), int(t.month)
+            else:
+                ye, me = map(int, e_norm.split("-"))
             months = (ye - ys) * 12 + (me - ms) + 1
+            if months <= 0:
+                months = None
     except Exception:
         months = None
 
@@ -3476,6 +3988,16 @@ def _looks_like_company(s: str) -> bool:
 def _guess_title_company_from_buffer(buf: list[str]) -> tuple[str, str]:
     window = [norm(x) for x in buf if norm(x)][-6:]
     title, company = "", ""
+
+    # NEW: handle single-line combos above the date line, e.g.:
+    # "Back-end Developer (ASP.NET) — Machine Builder Inc."
+    # "Apprenticeship | Machine Builder Inc."
+    for i in range(len(window) - 1, -1, -1):
+        t, c = _split_title_company_forward(window[i])
+        if t or c:
+            return t, c
+
+    # Existing behavior: find company line then title line
     for i in range(len(window) - 1, -1, -1):
         if _looks_like_company(window[i]):
             company = window[i]
@@ -3484,17 +4006,16 @@ def _guess_title_company_from_buffer(buf: list[str]) -> tuple[str, str]:
                     title = window[j]
                     break
             break
+
+    # Fallback: best title-like line
     if not title:
         for i in range(len(window) - 1, -1, -1):
             if _looks_like_title(window[i]):
                 title = window[i]
                 break
-    if not company:
-        for i in range(len(window) - 1, -1, -1):
-            if _looks_like_company(window[i]):
-                company = window[i]
-                break
+
     return title, company
+
 
 
 def fallback_experience(text_or_lines) -> list[dict]:
@@ -3579,7 +4100,10 @@ def fallback_experience(text_or_lines) -> list[dict]:
 
             # stop when the next header-ish line begins (title/company)
             if _looks_like_title(s) or _looks_like_company(s):
-                break
+                # Many resumes put the *next* title line before its date line.
+                # Only stop if a date line is coming up shortly (prevents dropping company lines / bullets).
+                if any(DATE_RE.search(lines[k]) for k in range(j + 1, min(n, j + 4))):
+                    break
 
             # overly long lines tend to be body text or a new section
             if len(s) > 110:
@@ -3595,33 +4119,98 @@ def fallback_experience(text_or_lines) -> list[dict]:
     while i < n:
         line = lines[i]
 
+        m_date = DATE_RE.search(line)
         # we anchor items on a date-range line
-        if not DATE_RE.search(line):
+        if not m_date:
             i += 1
             continue
 
-        start, end, months = parse_date_range(line)
-        title, company, forward_used = "", "", False
+        # Parse the date range from the date-part only (handles: "Title ... Jan 2025 – Present")
+        date_part = line[m_date.start():].strip()
+        start, end, months = parse_date_range(date_part)
+
+        title, company, location = "", "", ""
+        header_used = 0
+
+        # NEW: If the date line contains a prefix before the date, treat it as header text
+        # Example: "Apprenticeship June 2023 – Jan 2025"  -> prefix="Apprenticeship"
+        # Example: "Back-end Developer — Machine Builder Inc. Jan 2025 – Present" -> prefix has title+company
+        prefix = line[:m_date.start()].strip(" -•:·—|")
+        if prefix:
+            t0, c0 = _split_title_company_forward(prefix)
+            if t0 or c0:
+                title = title or t0
+                company = company or c0
+            else:
+                if not title and _looks_like_title(prefix):
+                    title = prefix
+                elif not company and _looks_like_company(prefix):
+                    company = prefix
+
+        # Optional: sometimes a location trails after the date on the same line
+        tail = line[m_date.end():].strip(" -•:·—|")
+        if tail and not location and _looks_like_location(tail):
+            location = tail
 
         # Prefer forward look (date line followed by title/company line)
-        if i + 1 < n:
-            t1, c1 = _split_title_company_forward(lines[i + 1])
+        # Only fill what we still don't have, so we don't overwrite a good inline header.
+        if i + 1 < n and (not title or not company):
+            next_line = lines[i + 1]
+            t1, c1 = _split_title_company_forward(next_line)
+
             if t1 or c1:
-                title, company, forward_used = t1, c1, True
-            elif _looks_like_title(lines[i + 1]):
-                title = lines[i + 1]
-                forward_used = True
-                if i + 2 < n and _looks_like_company(lines[i + 2]):
+                if not title:
+                    title = t1
+                if not company:
+                    company = c1
+                header_used = 1
+
+            elif not title and _looks_like_title(next_line):
+                title = next_line
+                header_used = 1
+                if i + 2 < n and not company and _looks_like_company(lines[i + 2]):
                     company = lines[i + 2]
+                    header_used = 2
+
+            # NEW: company-only line right after date (common when title is above/on-date-line)
+            elif not company and _looks_like_company(next_line) and not _looks_like_title(next_line):
+                company = next_line
+                header_used = 1
 
         # Fallback: look behind (when title/company are above the date)
-        if not title and not company:
+        # NEW: run this if either field is missing (not only when both are missing)
+        if (not title) or (not company):
             ctx = lines[max(0, i - 5) : i]
-            title, company = _guess_title_company_from_buffer(ctx)
+            t2, c2 = _guess_title_company_from_buffer(ctx)
+            if not title:
+                title = t2
+            if not company:
+                company = c2
 
-        # Description starts after any forward-used line(s)
-        desc_start = i + (2 if forward_used else 1)
+        # If company/location are listed after the date line (common in CVs), capture/consume them here.
+        j = i + 1 + header_used
+
+        # Consume a company line even if we already inferred company from look-behind,
+        # as long as it's the same company (prevents it leaking into description).
+        if j < n and _looks_like_company(lines[j]):
+            same_company = (not company) or (norm(company).lower() == norm(lines[j]).lower())
+            if same_company:
+                company = company or lines[j]
+                header_used += 1
+                j += 1
+
+        # location is often a standalone "City, ST" line after company
+        if j < n and _looks_like_location(lines[j]):
+            same_location = (not location) or (norm(location).lower() == norm(lines[j]).lower())
+            if same_location:
+                location = location or lines[j]
+                header_used += 1
+
+
+        # Description starts after any header lines we consumed
+        desc_start = i + 1 + header_used
         desc_lines, stop = gather_desc(desc_start, n)
+
 
         bullets: list[str] = []
         technologies: list[str] = []
@@ -3658,7 +4247,7 @@ def fallback_experience(text_or_lines) -> list[dict]:
                 {
                     "title": title,
                     "company": company,
-                    "location": "",
+                    "location": location,
                     "dates": {"start": start, "end": end, "months": months},
                     "bullets": bullets,
                     "technologies": technologies,
@@ -3728,15 +4317,38 @@ _AT_SPLIT = re.compile(r"\s+(?:at|@)\s+", re.I)
 
 def _split_title_company_forward(s: str) -> tuple[str, str]:
     """
-    'International Transfer Officer at Friebkla Corporation, France'
-    -> ('International Transfer Officer','Friebkla Corporation, France')
+    Try to split a single line that contains both title and company.
+
+    Supported patterns (rules-first):
+      - "Title at Company"
+      - "Title @ Company"
+      - "Title — Company"
+      - "Title - Company"
+      - "Title | Company"
+      - "Company — Title" (we'll flip if heuristics indicate this)
     """
     s = norm(s)
+    # 1) Strong indicator: "at" / "@"
     m = _AT_SPLIT.search(s)
-    if not m:
-        return "", ""
-    return s[: m.start()].strip(" -•:·—"), s[m.end() :].strip(" -•:·—")
+    if m:
+        return s[: m.start()].strip(" -•:·—"), s[m.end() :].strip(" -•:·—")
 
+    # 2) Common delimiters
+    parts = re.split(r"\s+[|/]\s+|\s+[-–—]\s+", s, maxsplit=1)
+    if len(parts) == 2:
+        left = parts[0].strip(" -•:·—")
+        right = parts[1].strip(" -•:·—")
+
+        if left and right:
+            if _looks_like_title(left) and _looks_like_company(right):
+                return left, right
+            if _looks_like_company(left) and _looks_like_title(right):
+                return right, left
+
+            # conservative fallback: assume left is title
+            if _looks_like_title(left):
+                return left, right
+    return "", ""
 
 def _parse_degree_and_field(s: str) -> tuple[str, str]:
     """
@@ -4060,9 +4672,7 @@ def extract_skills(lines: list[str]) -> list[str]:
             continue
         if DATE_RE.search(s):
             break
-        if re.search(
-            r"\b(education|experience|projects?|languages?|certifications?)\b", s, re.I
-        ):
+        if _skills_section_boundary(s):
             break
         if len(s) > 100 and re.search(
             r"\b(built|designed|developed|managed|worked|implemented|created)\b",
@@ -4168,7 +4778,7 @@ def extract_skills_from_text(text: str) -> list[str]:
             j = i + 1
             while j < len(lines):
                 s = lines[j]
-                if NEXT_SECTION_HEAD.match(s):
+                if _skills_section_boundary(s):
                     break
                 if len(s) > 140 and re.search(
                     r"\b(built|designed|developed|managed|implemented|created)\b",
@@ -4795,7 +5405,11 @@ SECTION_PATTERNS: Tuple[Tuple[str, re.Pattern], ...] = (
     ),
     (
         "SKILLS",
-        re.compile(r"(?i)^(skills|technical\s+skills|core\s+skills|key\s+skills)\b"),
+        re.compile(
+            r"(?i)^(skills|technical\s+skills|core\s+skills|key\s+skills|"
+            r"tech(?:nical)?\s+skills|tech(?:nical)?\s+stack|tech\s+stack|"
+            r"technical\s+stack|technologies|tools|tooling)\b"
+        ),
     ),
     (
         "EXPERIENCE",
@@ -4882,7 +5496,10 @@ def split_sections(text: str) -> Dict[str, Any]:
             tail = _match_heading(line, pat)
             if tail is None:
                 continue
-
+            # Prevent SKILLS category lines like "Languages: ..." from switching sections.
+            # Example: "Languages: Python, SQL" is often a SKILLS subcategory, not a LANGUAGES section.
+            if current == "SKILLS" and key in {"LANGUAGES", "CERTS"} and tail:
+                continue
             current = key
             switched = True
             if tail:
@@ -41423,9 +42040,8 @@ def test_parse_date_range_common_cases(s, exp_start, exp_end):
     start, end, months = parse_date_range(s)
     assert start == exp_start
     assert end == exp_end
-    # months may be None depending on bad input; for these it should be computed except Present
-    if exp_end != "Present":
-        assert isinstance(months, int) and months >= 1
+    # months should be computed (including for Present)
+    assert isinstance(months, int) and months >= 1
 
 
 def test_parse_date_range_garbage_is_safe():
@@ -41641,6 +42257,111 @@ def test_projects_tech_stack_must_be_allowlist_only():
     # not allowlisted
     assert "FooBarTech" not in tech
     assert "BazQuxFramework" not in tech
+
+
+================================================================================
+// Path: tests/test_regression_quy_cv.py
+================================================================================
+
+from pathlib import Path
+
+from ats_parser.parser import parse_text
+
+
+FIXTURE = Path(__file__).parent / "fixtures" / "quy_cv_en_sanitized.txt"
+
+
+def test_regression_quy_cv_sanitized_thresholds():
+    text = FIXTURE.read_text(encoding="utf-8")
+
+    resume = parse_text(text)
+
+    # 1) Contact
+    assert resume.contact.email, "email should be extracted"
+    assert resume.contact.phone, "phone should be extracted"
+
+    # 2) Experience
+    assert len(resume.experience) >= 2, "should extract at least 2 experience items"
+    assert all(e.title for e in resume.experience[:2]), "titles should not be empty"
+    assert any(e.bullets for e in resume.experience), "at least one experience should have bullets"
+
+    # Company/location should show up for most entries on this fixture
+    assert sum(1 for e in resume.experience if e.company) >= 2
+    assert any(e.location for e in resume.experience)
+
+    # 3) Skills
+    assert len(resume.skills) >= 8, "skills should be non-empty (allowlist-filtered)"
+
+    # 4) Present duration
+    present_items = [e for e in resume.experience if getattr(e.dates, "end", None) == "Present"]
+    assert present_items, "should detect at least one Present role"
+    assert all(isinstance(e.dates.months, int) and e.dates.months >= 1 for e in present_items)
+    
+    # 5) Anti-bleed guard: bullets should not accidentally contain section headers
+    bad_headers = {"EDUCATION", "PROJECTS", "SKILLS", "CERTIFICATIONS", "LANGUAGES", "SUMMARY"}
+    for e in resume.experience:
+        for b in e.bullets:
+            assert b.strip().upper() not in bad_headers, f"bullet bleed detected: {b!r}"
+
+
+
+================================================================================
+// Path: tests/test_regression_quy_cv_pdf.py
+================================================================================
+
+from pathlib import Path
+import os
+import pytest
+
+from ats_parser.parser import parse_file
+
+pytestmark = pytest.mark.slow
+
+def _find_pdf() -> Path | None:
+    # Optional override: set QUY_CV_PDF to an absolute path on your machine
+    override = os.environ.get("QUY_CV_PDF")
+    if override:
+        p = Path(override)
+        if p.exists():
+            return p
+
+    candidates = [
+        Path("uploads/1_QuyVuLuong_CV_EN.pdf"),
+        Path("uploads/QuyVuLuong_CV_EN.pdf"),
+        Path("tests/fixtures/QuyVuLuong_CV_EN.pdf"),
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+def test_regression_quy_cv_pdf_thresholds():
+    pdf = _find_pdf()
+    if not pdf:
+        pytest.skip("QuyVuLuong_CV_EN.pdf not found (set QUY_CV_PDF or place it in uploads/).")
+
+    try:
+        r = parse_file(str(pdf))
+    except ImportError:
+        pytest.skip("PyMuPDF not available in this environment.")
+
+    # Contact
+    assert r.contact.email, "email should be extracted"
+    assert r.contact.phone, "phone should be extracted"
+
+    # Experience basics
+    assert len(r.experience) >= 2, "should extract at least 2 experience items"
+    assert all(e.title for e in r.experience[:2]), "titles should not be empty"
+
+    # Company + location quality gates for this CV
+    assert all(e.company for e in r.experience[:2]), "company should not be empty for first 2 items"
+    assert all(e.location for e in r.experience[:2]), "location should not be empty for first 2 items"
+
+    # Bullets should exist for at least one role
+    assert any(len(e.bullets) >= 3 for e in r.experience), "expected some bullet content"
+
+    # Skills should not be empty
+    assert len(r.skills) >= 5, "skills should not be empty"
 
 
 ================================================================================
@@ -41887,6 +42608,53 @@ def test_backend_allowed_file_and_init_db(tmp_path, monkeypatch):
 
 
 ================================================================================
+// Path: tests/fixtures/quy_cv_en_sanitized.txt
+================================================================================
+
+Quy Vu Luong (Tim)
+Montreal, QC
++1 514-555-0123
+quy.vu.luong@example.com
+https://github.com/RealTimGFM
+
+SUMMARY
+Backend-focused developer building rule-driven parsing, web apps, and data workflows.
+
+SKILLS
+Languages: Python, SQL, C#, Java, JavaScript
+Frameworks: ASP.NET Core, Flask, Jakarta EE
+Databases: SQL Server, PostgreSQL, SQLite
+Tools: Git, Docker, Linux, AWS
+
+EXPERIENCE
+Back-end Developer (ASP.NET) — Machine Builder Inc.
+Jan 2025 – Present
+Machine Builder Inc.
+Montreal, QC
+- Built and maintained internal ASP.NET APIs used by multiple teams.
+- Implemented SQL Server queries and stored procedures for reporting and automation.
+- Improved reliability by adding tests and structured logging.
+
+Apprenticeship | Machine Builder Inc.
+Jun 2023 – Jan 2025
+Machine Builder Inc.
+Montreal, QC
+- Assisted in backend feature development and bug fixes.
+- Worked with SQL databases and API integrations.
+- Participated in code reviews and documentation.
+
+PROJECTS
+ProjectUnknown (ATS / Resume Parser) | Python
+- Implemented deterministic section splitting and allowlist-only skill extraction.
+- Added regression tests and parsing edge-case coverage.
+
+EDUCATION
+Diploma of College Studies (DEC) — Computer Science
+LaSalle College, Montreal, QC
+2024 – Present
+
+
+================================================================================
 // Path: tools/build_allowlists.py
 ================================================================================
 
@@ -42093,4 +42861,4 @@ if __name__ == "__main__":
 
 
 
-// Summary: wrote 52 files, skipped 56260 files.
+// Summary: wrote 57 files, skipped 56276 files.
