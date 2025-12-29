@@ -1,22 +1,55 @@
 from __future__ import annotations
-
-from typing import List
-import os
-import tempfile
-
-from .models import (
-    Resume,
-    Contact,
-    ExperienceItem,
-    EducationItem,
-    DateSpan,
-    ProjectItem,
-)
 from .ingest import read_pdf_text
+import os
+import re
+import tempfile
+from typing import List
+
+from .llm import extract_education_llm, extract_experience_llm
+from .models import (
+    Contact,
+    DateSpan,
+    EducationItem,
+    ExperienceItem,
+    ProjectItem,
+    Resume,
+)
+from .reconcile import merge_experience, postprocess_experience
 from .sections import split_sections
 from . import rules
-from .llm import extract_experience_llm, extract_education_llm
-from .reconcile import merge_experience
+
+
+# Headings your splitter recognizes (case-sensitive on purpose).
+# This targets the common PDF extraction issue where headings get appended to the prior line.
+_INLINE_HEADINGS = (
+    "SUMMARY",
+    "SKILLS",
+    "EXPERIENCE",
+    "PROJECTS",
+    "EDUCATION",
+    "CERTIFICATIONS",
+    "CERTS",
+    "LANGUAGES",
+)
+
+
+def _inject_inline_section_breaks(text: str) -> str:
+    """
+    Some PDF extractors concatenate content like:
+        "... structured logging. PROJECTS LachanceCapital.com – ..."
+    This makes split_sections() miss the heading because it only matches at line start.
+    We insert a newline before recognized ALL-CAPS headings when they appear mid-line.
+    """
+    if not text:
+        return text
+
+    for h in _INLINE_HEADINGS:
+        # Insert newline before " <HEADING>" when it is not already at a line start.
+        # Case-sensitive: avoids splitting normal sentence usage like "projects" / "experience".
+        text = re.sub(rf"(?<=.)(?<!\n)(?<!\w)\s*{h}\b", f"\n{h}", text)
+
+
+    return text
 
 
 def _split_name(full: str):
@@ -31,11 +64,21 @@ def _split_name(full: str):
     return parts[0], " ".join(parts[1:-1]), parts[-1]
 
 
-def parse_file(path: str) -> Resume:
-    text, ocr_pages = read_pdf_text(path)
+def parse_text(text: str, *, ocr_pages: int = 0) -> Resume:
+    # Normalize PDF text first, then split.
+    text = _inject_inline_section_breaks(text)
     secs = split_sections(text)
 
     warnings: list[str] = []
+
+    # ----- CONTACTS -----
+    contacts = rules.extract_contacts(text)
+
+    # ----- SKILLS -----
+    skills_list = rules.extract_skills(secs.get("SKILLS", []))
+    if not skills_list:
+        # fallback if the splitter missed the section heading
+        skills_list = rules.extract_skills_from_text(text)
 
     # ----- PROJECTS -----
     projects_lines = secs.get("PROJECTS") or []
@@ -43,7 +86,7 @@ def parse_file(path: str) -> Resume:
         projects_lines = [x.strip() for x in projects_lines.splitlines() if x.strip()]
 
     try:
-        # split_sections() usually returns the section content WITHOUT the header line,
+        # split_sections() usually returns section content WITHOUT the header line,
         # but extract_projects() expects to see a Projects heading to "arm" the parser.
         projects_raw = rules.extract_projects(["PROJECTS"] + (projects_lines or []))
         projects = [ProjectItem(**p) for p in (projects_raw or [])]
@@ -53,15 +96,6 @@ def parse_file(path: str) -> Resume:
 
     if projects_lines and not projects:
         warnings.append("Projects section present but no projects were extracted.")
-
-
-    # ----- CONTACTS + SKILLS -----
-    contacts = rules.extract_contacts(text)
-
-    skills_list = rules.extract_skills(secs.get("SKILLS", []))
-    if not skills_list:
-        # fallback if the splitter missed the section heading
-        skills_list = rules.extract_skills_from_text(text)
 
     # ----- EXPERIENCE (RULES) -----
     exp_text = "\n".join(secs.get("EXPERIENCE") or [])
@@ -95,7 +129,7 @@ def parse_file(path: str) -> Resume:
             for it in rules.fallback_experience(text)
         ]
 
-    # ----- EDUCATION -----
+    # ----- EDUCATION (RULES) -----
     edu_lines = secs.get("EDUCATION") or []
     edu_rule = [
         EducationItem(
@@ -109,7 +143,7 @@ def parse_file(path: str) -> Resume:
         for it in (rules.fallback_education(edu_lines) if edu_lines else [])
     ]
 
-    # LLM extraction (best-effort)
+    # ----- LLM EDUCATION (best-effort) -----
     try:
         edu_llm: List[EducationItem] = extract_education_llm("\n".join(edu_lines)) or []
     except Exception as e:
@@ -119,7 +153,7 @@ def parse_file(path: str) -> Resume:
     # Prefer deterministic rules; fall back to LLM only if rules found nothing
     education = edu_rule or edu_llm
 
-    # ----- EXPERIENCE (LLM) + MERGE -----
+    # ----- LLM EXPERIENCE (best-effort) + MERGE -----
     try:
         exp_llm: List[ExperienceItem] = extract_experience_llm(exp_text) or []
     except Exception as e:
@@ -127,6 +161,7 @@ def parse_file(path: str) -> Resume:
         warnings.append(f"Experience LLM failed: {type(e).__name__}")
 
     experience = merge_experience(exp_rule, exp_llm)
+    experience = postprocess_experience(experience)
 
     # ----- FLAGS -----
     # Only count uppercase buckets (the splitter also returns lowercase string views)
@@ -159,6 +194,12 @@ def parse_file(path: str) -> Resume:
         flags=flags,
     )
     return resume
+
+
+def parse_file(path: str) -> Resume:
+    text, ocr_pages = read_pdf_text(path)
+    return parse_text(text, ocr_pages=ocr_pages)
+
 
 
 def parse_bytes(data: bytes) -> Resume:
@@ -216,6 +257,9 @@ def adapt_for_backend(resume: Resume) -> dict:
     # Flatten projects (for later UI)
     proj_flat = []
     for p in getattr(resume, "projects", []) or []:
+        desc = "\n".join(p.bullets or []).strip()
+        if not desc:
+            desc = (p.role or "").strip()
         proj_flat.append(
             {
                 "title": p.title or "",
@@ -224,7 +268,7 @@ def adapt_for_backend(resume: Resume) -> dict:
                 "end_date": (p.dates.end or "") if p.dates else "",
                 "tech_stack": ", ".join(p.tech_stack or []),
                 "links": [str(u) for u in (p.links or [])],
-                "description": "\n".join(p.bullets or []).strip(),
+                "description": desc,
             }
         )
 

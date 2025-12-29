@@ -16,9 +16,8 @@ def test_parse_date_range_common_cases(s, exp_start, exp_end):
     start, end, months = parse_date_range(s)
     assert start == exp_start
     assert end == exp_end
-    # months may be None depending on bad input; for these it should be computed except Present
-    if exp_end != "Present":
-        assert isinstance(months, int) and months >= 1
+    # months should be computed (including for Present)
+    assert isinstance(months, int) and months >= 1
 
 
 def test_parse_date_range_garbage_is_safe():

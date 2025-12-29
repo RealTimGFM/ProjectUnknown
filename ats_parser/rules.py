@@ -1,10 +1,12 @@
 from __future__ import annotations
+import os
 import re
 from typing import List, Tuple
 from datetime import datetime
 import phonenumbers
 import json
 from pathlib import Path
+from .allowlists import extract_technologies_from_text
 
 try:
     import dateparser
@@ -192,6 +194,23 @@ NEXT_SECTION_HEAD = re.compile(
 
 def norm(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip())
+# In SKILLS parsing, treat "Languages: ..." as a category line (not a section break).
+# We only consider "Languages" a new section when it's effectively standalone (no inline list).
+_LANG_HEAD_ONLY = re.compile(r"^languages?\b\s*[:\-–—]?\s*$", re.I)
+
+def _skills_section_boundary(s: str) -> bool:
+    s = norm(s)
+    if not s:
+        return False
+    if re.match(
+        r"^(experience|work (?:history|experience)|employment|projects?|education|certifications?)\b",
+        s,
+        re.I,
+    ):
+        return True
+    if re.match(r"^languages?\b", s, re.I):
+        return bool(_LANG_HEAD_ONLY.match(s))
+    return False
 
 
 def _looks_like_location(s: str) -> bool:
@@ -204,7 +223,7 @@ def _looks_like_location(s: str) -> bool:
     return bool(LOCATION_HINT.search(s))
 
 
-def parse_date_range(s: str):
+def parse_date_range(s: str, *, today=None):
     """
     Handles (English only):
       - '2008 – Present'
@@ -273,13 +292,19 @@ def parse_date_range(s: str):
         elif ry:
             e_norm = f"{ry}-01"
 
-    # duration (inclusive) when both YYYY-MM present
+    # duration (inclusive) when start exists
     months = None
     try:
-        if s_norm and e_norm and e_norm != "Present":
+        if s_norm and e_norm:
             ys, ms = map(int, s_norm.split("-"))
-            ye, me = map(int, e_norm.split("-"))
+            if e_norm == "Present":
+                t = today or datetime.today()
+                ye, me = int(t.year), int(t.month)
+            else:
+                ye, me = map(int, e_norm.split("-"))
             months = (ye - ys) * 12 + (me - ms) + 1
+            if months <= 0:
+                months = None
     except Exception:
         months = None
 
@@ -355,6 +380,16 @@ def _looks_like_company(s: str) -> bool:
 def _guess_title_company_from_buffer(buf: list[str]) -> tuple[str, str]:
     window = [norm(x) for x in buf if norm(x)][-6:]
     title, company = "", ""
+
+    # NEW: handle single-line combos above the date line, e.g.:
+    # "Back-end Developer (ASP.NET) — Machine Builder Inc."
+    # "Apprenticeship | Machine Builder Inc."
+    for i in range(len(window) - 1, -1, -1):
+        t, c = _split_title_company_forward(window[i])
+        if t or c:
+            return t, c
+
+    # Existing behavior: find company line then title line
     for i in range(len(window) - 1, -1, -1):
         if _looks_like_company(window[i]):
             company = window[i]
@@ -363,17 +398,16 @@ def _guess_title_company_from_buffer(buf: list[str]) -> tuple[str, str]:
                     title = window[j]
                     break
             break
+
+    # Fallback: best title-like line
     if not title:
         for i in range(len(window) - 1, -1, -1):
             if _looks_like_title(window[i]):
                 title = window[i]
                 break
-    if not company:
-        for i in range(len(window) - 1, -1, -1):
-            if _looks_like_company(window[i]):
-                company = window[i]
-                break
+
     return title, company
+
 
 
 def fallback_experience(text_or_lines) -> list[dict]:
@@ -423,6 +457,88 @@ def fallback_experience(text_or_lines) -> list[dict]:
                 if 1 <= len(t.split()) <= 4 and not t.endswith("."):
                     toks.append(t)
         return toks
+    
+
+    _TECH_TOKEN_RE = re.compile(r"\.NET|[A-Za-z0-9]+(?:[.+#-][A-Za-z0-9]+)*")
+
+    def _extract_tech_from_sentence(sentence: str) -> list[str]:
+        """
+        Mine technologies from a normal sentence/bullet like:
+            "Built APIs with ASP.NET using C# and SQL Server."
+        Uses allowlist if enabled; otherwise uses a conservative heuristic.
+        """
+        if not sentence:
+            return []
+
+        s = sentence.strip()
+        spans: list[str] = []
+
+        # Pull "techy" parts of the sentence
+        # 1) after common triggers
+        triggers = [
+            "using",
+            "with",
+            "built with",
+            "stack",
+            "tech",
+            "technologies",
+            "tools",
+            "frameworks",
+        ]
+        low = s.lower()
+        for t in triggers:
+            pos = low.find(t)
+            if pos != -1:
+                spans.append(s[pos + len(t) :].strip(" :.-—|"))
+
+        # 2) inside parentheses
+        spans.extend(re.findall(r"\(([^)]{1,120})\)", s))
+
+        # 3) if it looks list-like, scan the whole line too
+        if s.count(",") >= 2 or any(ch in s for ch in ("#", ".", "+")):
+            spans.append(s)
+
+        # Always include the original sentence as last resort,
+        # but we'll filter aggressively in allowlist mode anyway.
+        spans.append(s)
+
+        found: list[str] = []
+        seen_local: set[str] = set()
+
+        def _push(val: str):
+            k = (val or "").casefold()
+            if k and k not in seen_local:
+                seen_local.add(k)
+                found.append(val)
+
+        for span in spans:
+            toks = _TECH_TOKEN_RE.findall(span)
+            if not toks:
+                continue
+
+            # Build n-grams up to 3 tokens ("SQL Server", "ASP .NET" won't happen but "SQL Server" will)
+            max_n = 3
+            for ngram_size in range(max_n, 0, -1):
+                for i0 in range(0, len(toks) - ngram_size + 1):
+                    cand = " ".join(toks[i0 : i0 + ngram_size]).strip()
+                    if not cand:
+                        continue
+
+                    if tech_allow_enabled:
+                        key = _norm_key(cand)
+                        canon = tech_alias_to_canon.get(key) or tech_canon_by_key.get(key)
+                        if canon:
+                            _push(canon)
+                    else:
+                        # Conservative fallback: keep only "tech-looking" tokens
+                        # - contains # . + or is multi-word
+                        if any(ch in cand for ch in ("#", ".", "+")) or " " in cand:
+                            if 1 <= len(cand.split()) <= 4 and not cand.endswith("."):
+                                _push(cand)
+
+        return found
+
+
 
     def gather_desc(start_idx: int, n: int):
         """
@@ -458,7 +574,10 @@ def fallback_experience(text_or_lines) -> list[dict]:
 
             # stop when the next header-ish line begins (title/company)
             if _looks_like_title(s) or _looks_like_company(s):
-                break
+                # Many resumes put the *next* title line before its date line.
+                # Only stop if a date line is coming up shortly (prevents dropping company lines / bullets).
+                if any(DATE_RE.search(lines[k]) for k in range(j + 1, min(n, j + 4))):
+                    break
 
             # overly long lines tend to be body text or a new section
             if len(s) > 110:
@@ -474,37 +593,106 @@ def fallback_experience(text_or_lines) -> list[dict]:
     while i < n:
         line = lines[i]
 
+        m_date = DATE_RE.search(line)
         # we anchor items on a date-range line
-        if not DATE_RE.search(line):
+        if not m_date:
             i += 1
             continue
 
-        start, end, months = parse_date_range(line)
-        title, company, forward_used = "", "", False
+        # Parse the date range from the date-part only (handles: "Title ... Jan 2025 – Present")
+        date_part = line[m_date.start():].strip()
+        start, end, months = parse_date_range(date_part)
+
+        title, company, location = "", "", ""
+        header_used = 0
+
+        # NEW: If the date line contains a prefix before the date, treat it as header text
+        # Example: "Apprenticeship June 2023 – Jan 2025"  -> prefix="Apprenticeship"
+        # Example: "Back-end Developer — Machine Builder Inc. Jan 2025 – Present" -> prefix has title+company
+        prefix = line[:m_date.start()].strip(" -•:·—|")
+        if prefix:
+            t0, c0 = _split_title_company_forward(prefix)
+            if t0 or c0:
+                title = title or t0
+                company = company or c0
+            else:
+                if not title and _looks_like_title(prefix):
+                    title = prefix
+                elif not company and _looks_like_company(prefix):
+                    company = prefix
+
+        # Optional: sometimes a location trails after the date on the same line
+        tail = line[m_date.end():].strip(" -•:·—|")
+        if tail and not location and _looks_like_location(tail):
+            location = tail
 
         # Prefer forward look (date line followed by title/company line)
-        if i + 1 < n:
-            t1, c1 = _split_title_company_forward(lines[i + 1])
+        # Only fill what we still don't have, so we don't overwrite a good inline header.
+        if i + 1 < n and (not title or not company):
+            next_line = lines[i + 1]
+            t1, c1 = _split_title_company_forward(next_line)
+
             if t1 or c1:
-                title, company, forward_used = t1, c1, True
-            elif _looks_like_title(lines[i + 1]):
-                title = lines[i + 1]
-                forward_used = True
-                if i + 2 < n and _looks_like_company(lines[i + 2]):
+                if not title:
+                    title = t1
+                if not company:
+                    company = c1
+                header_used = 1
+
+            elif not title and _looks_like_title(next_line):
+                title = next_line
+                header_used = 1
+                if i + 2 < n and not company and _looks_like_company(lines[i + 2]):
                     company = lines[i + 2]
+                    header_used = 2
+
+            # NEW: company-only line right after date (common when title is above/on-date-line)
+            elif not company and _looks_like_company(next_line) and not _looks_like_title(next_line):
+                company = next_line
+                header_used = 1
 
         # Fallback: look behind (when title/company are above the date)
-        if not title and not company:
+        # NEW: run this if either field is missing (not only when both are missing)
+        if (not title) or (not company):
             ctx = lines[max(0, i - 5) : i]
-            title, company = _guess_title_company_from_buffer(ctx)
+            t2, c2 = _guess_title_company_from_buffer(ctx)
+            if not title:
+                title = t2
+            if not company:
+                company = c2
 
-        # Description starts after any forward-used line(s)
-        desc_start = i + (2 if forward_used else 1)
+        # If company/location are listed after the date line (common in CVs), capture/consume them here.
+        j = i + 1 + header_used
+
+        # Consume a company line even if we already inferred company from look-behind,
+        # as long as it's the same company (prevents it leaking into description).
+        if j < n and _looks_like_company(lines[j]):
+            same_company = (not company) or (norm(company).lower() == norm(lines[j]).lower())
+            if same_company:
+                company = company or lines[j]
+                header_used += 1
+                j += 1
+
+        # location is often a standalone "City, ST" line after company
+        if j < n and _looks_like_location(lines[j]):
+            same_location = (not location) or (norm(location).lower() == norm(lines[j]).lower())
+            if same_location:
+                location = location or lines[j]
+                header_used += 1
+
+
+        # Description starts after any header lines we consumed
+        desc_start = i + 1 + header_used
         desc_lines, stop = gather_desc(desc_start, n)
+
 
         bullets: list[str] = []
         technologies: list[str] = []
         tech_seen: set[str] = set()
+
+        if bullets:
+            for t in extract_technologies_from_text(" ".join(bullets)):
+                _add_unique(technologies, tech_seen, t)
 
         for raw in desc_lines:
             s = norm(raw)
@@ -527,17 +715,21 @@ def fallback_experience(text_or_lines) -> list[dict]:
                 b = BULLET.sub("", s).strip()
                 if b:
                     bullets.append(b)
+                    for t in _mine_tech_from_text(b, tech_allow_enabled, tech_canon_by_key, tech_alias_to_canon):
+                        _add_unique(technologies, tech_seen, t)
             else:
                 # treat short non-header lines as bullet-like description
                 if 0 < len(s) <= 200:
                     bullets.append(s)
+                    for t in _extract_tech_from_sentence(s):
+                        _add_unique(technologies, tech_seen, t)
 
         if title or company or bullets or technologies:
             items.append(
                 {
                     "title": title,
                     "company": company,
-                    "location": "",
+                    "location": location,
                     "dates": {"start": start, "end": end, "months": months},
                     "bullets": bullets,
                     "technologies": technologies,
@@ -607,15 +799,38 @@ _AT_SPLIT = re.compile(r"\s+(?:at|@)\s+", re.I)
 
 def _split_title_company_forward(s: str) -> tuple[str, str]:
     """
-    'International Transfer Officer at Friebkla Corporation, France'
-    -> ('International Transfer Officer','Friebkla Corporation, France')
+    Try to split a single line that contains both title and company.
+
+    Supported patterns (rules-first):
+      - "Title at Company"
+      - "Title @ Company"
+      - "Title — Company"
+      - "Title - Company"
+      - "Title | Company"
+      - "Company — Title" (we'll flip if heuristics indicate this)
     """
     s = norm(s)
+    # 1) Strong indicator: "at" / "@"
     m = _AT_SPLIT.search(s)
-    if not m:
-        return "", ""
-    return s[: m.start()].strip(" -•:·—"), s[m.end() :].strip(" -•:·—")
+    if m:
+        return s[: m.start()].strip(" -•:·—"), s[m.end() :].strip(" -•:·—")
 
+    # 2) Common delimiters
+    parts = re.split(r"\s+[|/]\s+|\s+[-–—]\s+", s, maxsplit=1)
+    if len(parts) == 2:
+        left = parts[0].strip(" -•:·—")
+        right = parts[1].strip(" -•:·—")
+
+        if left and right:
+            if _looks_like_title(left) and _looks_like_company(right):
+                return left, right
+            if _looks_like_company(left) and _looks_like_title(right):
+                return right, left
+
+            # conservative fallback: assume left is title
+            if _looks_like_title(left):
+                return left, right
+    return "", ""
 
 def _parse_degree_and_field(s: str) -> tuple[str, str]:
     """
@@ -939,9 +1154,7 @@ def extract_skills(lines: list[str]) -> list[str]:
             continue
         if DATE_RE.search(s):
             break
-        if re.search(
-            r"\b(education|experience|projects?|languages?|certifications?)\b", s, re.I
-        ):
+        if _skills_section_boundary(s):
             break
         if len(s) > 100 and re.search(
             r"\b(built|designed|developed|managed|worked|implemented|created)\b",
@@ -1047,7 +1260,7 @@ def extract_skills_from_text(text: str) -> list[str]:
             j = i + 1
             while j < len(lines):
                 s = lines[j]
-                if NEXT_SECTION_HEAD.match(s):
+                if _skills_section_boundary(s):
                     break
                 if len(s) > 140 and re.search(
                     r"\b(built|designed|developed|managed|implemented|created)\b",
@@ -1106,6 +1319,70 @@ def _load_compiled_tech_allowlists():
 
     setattr(_load_compiled_tech_allowlists, "_cache", cached)
     return cached
+
+def _tokenize_for_tech(text: str) -> list[str]:
+    """
+    Tokenizer that preserves tech punctuation like '.', '+', '#'.
+    Examples:
+      "ASP.NET" -> ["ASP.NET"]
+      "C#"      -> ["C#"]
+      "SQL Server." -> ["SQL", "Server"]
+    """
+    if not text:
+        return []
+    # Keep letters/digits and . + # ; convert everything else to spaces
+    s = re.sub(r"[^A-Za-z0-9\.\+#]+", " ", text)
+    toks = []
+    for t in s.split():
+        t = t.strip()
+        if not t:
+            continue
+        # Remove trailing sentence punctuation only (keep # and +)
+        t = t.rstrip(".,;:!)?]")
+        t = t.lstrip("([")
+        if t:
+            toks.append(t)
+    return toks
+
+
+def _mine_tech_from_text(text: str, enabled: bool, canon_by_key: dict[str, str], alias_to_canon: dict[str, str]) -> list[str]:
+    """
+    Mine allowlisted technologies from free text (e.g., bullets).
+    Uses n-gram matching so "SQL Server" works, and aliases like "C Sharp" -> "C#".
+    """
+    if not enabled or not text:
+        return []
+
+    toks = _tokenize_for_tech(text)
+    if not toks:
+        return []
+
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def _add(canon: str):
+        k = (canon or "").casefold()
+        if k and k not in seen:
+            seen.add(k)
+            found.append(canon)
+
+    i = 0
+    max_n = 5  # supports phrases like "SQL Server Management Studio"
+    while i < len(toks):
+        matched = False
+        for n in range(min(max_n, len(toks) - i), 0, -1):
+            phrase = " ".join(toks[i : i + n])
+            key = _norm_key(phrase)
+            canon = alias_to_canon.get(key) or canon_by_key.get(key)
+            if canon:
+                _add(canon)
+                i += n
+                matched = True
+                break
+        if not matched:
+            i += 1
+
+    return found
 
 
 # --- Projects extraction ------------------------------------------------------
@@ -1388,6 +1665,125 @@ def extract_projects(lines: list[str]) -> list[dict]:
 
     projects: list[dict] = []
     cur: dict | None = None
+    # --- Single-date lines in PROJECTS (PDFs often have: "Nov 2024" on its own line) ---
+    _MONTHS = {
+        "jan": 1, "january": 1,
+        "feb": 2, "february": 2,
+        "mar": 3, "march": 3,
+        "apr": 4, "april": 4,
+        "may": 5,
+        "jun": 6, "june": 6,
+        "jul": 7, "july": 7,
+        "aug": 8, "august": 8,
+        "sep": 9, "sept": 9, "september": 9,
+        "oct": 10, "october": 10,
+        "nov": 11, "november": 11,
+        "dec": 12, "december": 12,
+    }
+
+    _SINGLE_MONTH_YEAR_PREFIX_RE = re.compile(
+        r"^(?P<mon>Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+        r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+        r"\s+(?P<y>\d{4})(?P<rest>.*)$",
+        re.I,
+    )
+    _YEAR_ONLY_PREFIX_RE = re.compile(r"^(?P<y>\d{4})(?P<rest>.*)$")
+
+    def _parse_single_date_prefix(s: str):
+        """
+        Returns (start_yyyy_mm, remaining_text).
+        Examples:
+          "Nov 2024" -> ("2024-11", "")
+          "June 2025 and improve parsing accuracy." -> ("2025-06", "and improve parsing accuracy.")
+          "2024" -> ("2024-01", "")
+        """
+        s = (s or "").strip()
+        if not s:
+            return None, ""
+
+        m = _SINGLE_MONTH_YEAR_PREFIX_RE.match(s)
+        if m:
+            mon = (m.group("mon") or "").strip().lower()
+            y = int(m.group("y"))
+            mm = _MONTHS.get(mon, _MONTHS.get(mon[:3]))
+            rest = (m.group("rest") or "").strip(" -–—•:|")
+            if mm:
+                return f"{y}-{mm:02d}", rest
+            return f"{y}-01", rest
+
+        m = _YEAR_ONLY_PREFIX_RE.match(s)
+        if m:
+            y = int(m.group("y"))
+            rest = (m.group("rest") or "").strip(" -–—•:|")
+            return f"{y}-01", rest
+
+        return None, s
+
+    # NEW: load allowlist once (same approach as experience)
+    tech_allow_enabled, tech_canon_by_key, tech_alias_to_canon = _load_compiled_tech_allowlists()
+
+    # NEW: sentence mining helper
+    _TECH_TOKEN_RE = re.compile(r"\.NET|[A-Za-z0-9]+(?:[.+#-][A-Za-z0-9]+)*")
+
+    def _extract_tech_from_sentence(sentence: str) -> list[str]:
+        """
+        Mine technologies from a normal sentence/bullet like:
+            "Built APIs with ASP.NET using C# and SQL Server."
+        Uses allowlist if enabled; otherwise uses a conservative heuristic.
+        """
+        if not sentence:
+            return []
+
+        s = sentence.strip()
+        spans: list[str] = []
+
+        triggers = ["using", "with", "built with", "stack", "tech", "technologies", "tools", "frameworks"]
+        low = s.lower()
+        for t in triggers:
+            pos = low.find(t)
+            if pos != -1:
+                spans.append(s[pos + len(t) :].strip(" :.-—|"))
+
+        spans.extend(re.findall(r"\(([^)]{1,120})\)", s))
+
+        if s.count(",") >= 2 or any(ch in s for ch in ("#", ".", "+")):
+            spans.append(s)
+
+        spans.append(s)
+
+        found: list[str] = []
+        seen: set[str] = set()
+
+        def _push(val: str):
+            k = (val or "").casefold()
+            if k and k not in seen:
+                seen.add(k)
+                found.append(val)
+
+        for span in spans:
+            toks = _TECH_TOKEN_RE.findall(span)
+            if not toks:
+                continue
+
+            # n-grams up to 3 tokens to catch things like "SQL Server"
+            for ngram_size in (3, 2, 1):
+                for i0 in range(0, len(toks) - ngram_size + 1):
+                    cand = " ".join(toks[i0 : i0 + ngram_size]).strip()
+                    if not cand:
+                        continue
+
+                    if tech_allow_enabled:
+                        key = _norm_key(cand)
+                        canon = tech_alias_to_canon.get(key) or tech_canon_by_key.get(key)
+                        if canon:
+                            _push(canon)
+                    else:
+                        # conservative fallback (avoid random words)
+                        if any(ch in cand for ch in ("#", ".", "+")) or " " in cand:
+                            if 1 <= len(cand.split()) <= 4 and not cand.endswith("."):
+                                _push(cand)
+
+        return found
 
     def _start_new_project(heading_line: str):
         nonlocal cur
@@ -1409,6 +1805,17 @@ def extract_projects(lines: list[str]) -> list[dict]:
 
     # Iterate after the heading line
     for line in raw[1:]:
+        # If we haven't started a project yet, the first non-tech/link/bullet line
+        # is very often the project title (e.g., "Resume Parser").
+        if cur is None:
+            if (
+                not TECH_LINE_RE.match(line)
+                and not LINK_LINE_RE.match(line)
+                and not re.match(r"^[\-\*\u2022]\s+", line)
+                and not PROJECTS_HEAD.match(line)
+            ):
+                _start_new_project(line)
+            continue
         if not line:
             continue
 
@@ -1428,15 +1835,40 @@ def extract_projects(lines: list[str]) -> list[dict]:
         # If we haven't started a project yet, ignore detail lines.
         if cur is None:
             continue
+        # Date-only or date-prefixed line (common in PDFs)
+        # Example lines:
+        #   "Nov 2024"
+        #   "Feb 2025"
+        #   "June 2025 and improve parsing accuracy."
+        if cur.get("dates"):
+            line_no_bullet = re.sub(r"^[\-\*\u2022]\s+", "", line).strip()
+            ym, rest = _parse_single_date_prefix(line_no_bullet)
+
+            if ym:
+                # If start missing -> set start
+                if cur["dates"].get("start") is None:
+                    cur["dates"]["start"] = ym
+                # Else if end missing -> set end
+                elif cur["dates"].get("end") is None:
+                    cur["dates"]["end"] = ym
+                else:
+                    # If both are already set, treat as content (rare)
+                    if rest and rest != "•":
+                        cur["bullets"].append(rest)
+
+                # Keep trailing text (if any) as bullet
+                if rest and rest != "•":
+                    cur["bullets"].append(rest)
+
+                continue
+
 
         # Tech line -> tokenize -> allowlist filter
         mtech = TECH_LINE_RE.match(line)
         if mtech:
             tech_raw = mtech.group(2).strip()
             tokens = _split_on_separators(tech_raw)
-            tech = _filter_tech_allowlist(
-                tokens
-            )  # drops unknown tokens in allowlist mode
+            tech = _filter_tech_allowlist(tokens)  # drops unknown tokens in allowlist mode
             for t in tech:
                 if t not in cur["tech_stack"]:
                     cur["tech_stack"].append(t)
@@ -1455,15 +1887,112 @@ def extract_projects(lines: list[str]) -> list[dict]:
                     cur["links"].append(u)
             continue
 
+        if re.search(r"[|,/;]", line):
+            tokens = _split_on_separators(line)
+            if len(tokens) >= 3:
+                tech = _filter_tech_allowlist(tokens)
+                if tech:
+                    for t in tech:
+                        if t not in cur["tech_stack"]:
+                            cur["tech_stack"].append(t)
+                    continue
         # Bullet / description line
+                # NEW: ignore stray bullet-only lines like "•"
+        if re.match(r"^[\-\*\u2022]\s*$", line):
+            continue
+
+        # NEW: date-only lines inside a project block should become project dates, not bullets
+        # e.g. "Nov 2024" or "June 2025"
+        if DATE_RE.search(line) and len(line) <= 20 and not re.search(r"[—–-]", line):
+            try:
+                s, e, _m = parse_date_range(line)
+            except Exception:
+                s, e = None, None
+
+            if cur.get("dates") is None:
+                cur["dates"] = {"start": None, "end": None}
+
+            # only fill if empty (do not overwrite heading dates)
+            if s and not cur["dates"].get("start"):
+                cur["dates"]["start"] = s
+            if e and not cur["dates"].get("end"):
+                cur["dates"]["end"] = e
+
+            continue
+
+        # NEW: continuation lines (not bullets) should attach to the previous bullet
+        if cur.get("bullets") and not re.match(r"^[\-\*\u2022]\s+", line):
+            if line and (line[0].islower() or line.lower().startswith(("and ", "to ", "for ", "with ", "by "))):
+                cur["bullets"][-1] = (cur["bullets"][-1].rstrip() + " " + line.strip()).strip()
+                continue
+
         b = re.sub(r"^[\-\*\u2022]\s+", "", line).strip()
         if b:
             cur["bullets"].append(b)
 
+            # NEW: mine technologies from normal bullet text
+            for t in _extract_tech_from_sentence(b):
+                if t not in cur["tech_stack"]:
+                    cur["tech_stack"].append(t)
+
+    # Drop empty shells (no title already filtered; this is extra safety)
+
+    # ---- Post-clean bullets: merge dangling fragments like "and improve parsing accuracy."
+    for p in projects:
+        cleaned = []
+        for b in (p.get("bullets") or []):
+            s = (b or "").strip()
+            if not s:
+                continue
+
+            # Merge fragments that start with conjunctions into previous bullet
+            if cleaned and re.match(r"^(and|or|but|with|to)\b", s, flags=re.IGNORECASE):
+                cleaned[-1] = (cleaned[-1].rstrip(".") + " " + s).strip()
+            else:
+                cleaned.append(s)
+
+        p["bullets"] = cleaned
+
+
     # Drop empty shells (no title already filtered; this is extra safety)
     projects = [p for p in projects if p.get("title")]
 
+    # ---- bullet cleanup (prevents dangling fragments like "and improve parsing accuracy.") ----
+    FRAG_RE = re.compile(r"^(and|or|but|with|to)\b", re.IGNORECASE)
+
+    for p in projects:
+        cleaned: list[str] = []
+        for b in (p.get("bullets") or []):
+            s = norm(b)
+            if not s:
+                continue
+
+            # drop lone bullet artifacts
+            if s in {"•", "·", "-", "–", "—"}:
+                continue
+
+            # drop date-only bullets (e.g., "June 2025") if they slipped in
+            try:
+                if DATE_RE.fullmatch(s):
+                    continue
+            except Exception:
+                pass
+
+            # merge or drop dangling fragment bullets
+            if FRAG_RE.match(s):
+                if cleaned:
+                    cleaned[-1] = (cleaned[-1].rstrip() + " " + s).strip()
+                else:
+                    # if it's the first bullet and starts with "and/or/but/with/to", drop it
+                    continue
+            else:
+                cleaned.append(s)
+
+        p["bullets"] = cleaned
+
     return projects
+
+
 
 
 def _split_simple_tokens(s: str) -> list[str]:
@@ -1564,7 +2093,47 @@ def _load_allowlist_pair(base_name: str, aliases_name: str):
 
 
 def _load_compiled_tech_allowlists():
-    return _load_allowlist_pair("tech_allowlist.txt", "tech_aliases.json")
+    """
+    Load compiled tech allowlist + aliases.
+
+    IMPORTANT:
+    - Must enable even for small lists (tests use 3–10 items).
+    - Uses ATS_TECH_ALLOWLIST_DIR if set (tests set this).
+    """
+    allow_dir = os.environ.get("ATS_TECH_ALLOWLIST_DIR")
+    if allow_dir:
+        base = Path(allow_dir)
+    else:
+        # repo root (two levels up from this file)
+        base = Path(__file__).resolve().parent.parent / "data" / "allowlists" / "compiled"
+
+    tech_txt = base / "tech_allowlist.txt"
+    alias_json = base / "tech_aliases.json"
+
+    canon_by_key: dict[str, str] = {}
+    alias_to_canon: dict[str, str] = {}
+
+    if tech_txt.exists():
+        for line in tech_txt.read_text(encoding="utf-8", errors="ignore").splitlines():
+            canon = (line or "").strip()
+            if not canon:
+                continue
+            canon_by_key[_norm_key(canon)] = canon
+
+    if alias_json.exists():
+        try:
+            data = json.loads(alias_json.read_text(encoding="utf-8", errors="ignore") or "{}")
+            if isinstance(data, dict):
+                for alias, canon in data.items():
+                    if not alias or not canon:
+                        continue
+                    alias_to_canon[_norm_key(str(alias))] = str(canon).strip()
+        except Exception:
+            # If aliases file is malformed, just ignore it
+            pass
+
+    enabled = bool(canon_by_key)  # <-- key fix: no size threshold
+    return enabled, canon_by_key, alias_to_canon
 
 
 def _load_compiled_skills_allowlists():

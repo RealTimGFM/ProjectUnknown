@@ -1,0 +1,41 @@
+Quy Vu Luong (Tim)
+Montreal, QC
++1 514-555-0123
+quy.vu.luong@example.com
+https://github.com/RealTimGFM
+
+SUMMARY
+Backend-focused developer building rule-driven parsing, web apps, and data workflows.
+
+SKILLS
+Languages: Python, SQL, C#, Java, JavaScript
+Frameworks: ASP.NET Core, Flask, Jakarta EE
+Databases: SQL Server, PostgreSQL, SQLite
+Tools: Git, Docker, Linux, AWS
+
+EXPERIENCE
+Back-end Developer (ASP.NET) — Machine Builder Inc.
+Jan 2025 – Present
+Machine Builder Inc.
+Montreal, QC
+- Built and maintained internal ASP.NET APIs used by multiple teams.
+- Implemented SQL Server queries and stored procedures for reporting and automation.
+- Improved reliability by adding tests and structured logging.
+
+Apprenticeship | Machine Builder Inc.
+Jun 2023 – Jan 2025
+Machine Builder Inc.
+Montreal, QC
+- Assisted in backend feature development and bug fixes.
+- Worked with SQL databases and API integrations.
+- Participated in code reviews and documentation.
+
+PROJECTS
+ProjectUnknown (ATS / Resume Parser) | Python
+- Implemented deterministic section splitting and allowlist-only skill extraction.
+- Added regression tests and parsing edge-case coverage.
+
+EDUCATION
+Diploma of College Studies (DEC) — Computer Science
+LaSalle College, Montreal, QC
+2024 – Present
