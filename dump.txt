@@ -2,7 +2,7 @@
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-12-27T03:39:29Z
+Generated: 2025-12-29T01:38:03Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -92,6 +92,7 @@ ProjectUnknown/
 │   ├── test_education_fallback.py
 │   ├── test_experience_fallback.py
 │   ├── test_experience_tech_allowlist.py
+│   ├── test_experience_tech_mining_from_bullets.py
 │   ├── test_parser_pipeline_contract.py
 │   ├── test_projects_contract.py
 │   ├── test_projects_tech_allowlist.py
@@ -118,7 +119,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 19  Files: 87
+Directories: 19  Files: 88
 
 ================================================================================
 FILE CONTENTS
@@ -974,7 +975,7 @@ if __name__ == "__main__":
 PROJECT SUMMARY
 ================================================================================
 
-Generated: 2025-12-27T03:39:29Z
+Generated: 2025-12-29T01:38:03Z
 Root: C:\Users\User\Documents\GitHub\ProjectUnknown
 Python: 3.13.5
 
@@ -1064,6 +1065,7 @@ ProjectUnknown/
 │   ├── test_education_fallback.py
 │   ├── test_experience_fallback.py
 │   ├── test_experience_tech_allowlist.py
+│   ├── test_experience_tech_mining_from_bullets.py
 │   ├── test_parser_pipeline_contract.py
 │   ├── test_projects_contract.py
 │   ├── test_projects_tech_allowlist.py
@@ -1090,7 +1092,7 @@ ProjectUnknown/
 ├── requirements.txt
 └── resume_parser.py
 
-Directories: 19  Files: 87
+Directories: 19  Files: 88
 
 ================================================================================
 FILE CONTENTS
@@ -2496,134 +2498,241 @@ See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more inf
 // Path: ats_parser/__init__.py
 ================================================================================
 
+﻿"""
+Hybrid resume parser package (rules + optional LLM).
 
-"""Hybrid resume parser package (rules + optional LLM)."""
-from .parser import parse_file, parse_bytes, adapt_for_backend
-from .debug import debug_parse_text
+Important: importing the package must NOT require optional PDF dependencies.
+"""
+from __future__ import annotations
+
+from . import rules
+
+__all__ = ["rules", "parse_file", "parse_bytes", "adapt_for_backend"]
+
+
+def parse_file(path: str):
+    # Lazy import so unit tests can import ats_parser without PDF deps installed
+    from .parser import parse_file as _parse_file
+
+    return _parse_file(path)
+
+
+def parse_bytes(data: bytes):
+    from .parser import parse_bytes as _parse_bytes
+
+    return _parse_bytes(data)
+
+
+def adapt_for_backend(resume):
+    from .parser import adapt_for_backend as _adapt_for_backend
+
+    return _adapt_for_backend(resume)
+
 
 ================================================================================
 // Path: ats_parser/allowlists.py
 ================================================================================
 
-# ats_parser/allowlists.py
 from __future__ import annotations
 
 import json
-import os
+import re
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Tuple, Dict, List, Optional
 
 
-# Cache so we only hit disk once per process.
-_CACHE: tuple[list[str] | None, dict[str, str], list[str] | None, dict[str, str]] | None = None
+# ------------------------------------------------------------
+# Normalization helpers
+# ------------------------------------------------------------
+
+_WS_RE = re.compile(r"\s+")
+# Keep letters/numbers plus a few tech chars (C#, C++, ASP.NET, .NET)
+_KEEP_RE = re.compile(r"[^a-z0-9+#.\s]+")
 
 
-def _repo_root() -> Path:
-    # ats_parser/allowlists.py -> ats_parser -> repo root
-    return Path(__file__).resolve().parents[1]
-
-
-def _find_compiled_dir() -> Path | None:
+def _norm_key(s: str) -> str:
     """
-    Locate the compiled allowlists directory.
+    Normalize a token so aliases + canon lookups are stable.
 
-    Supported layouts:
-      - <repo>/data/allowlists/compiled
-      - <repo>/compiled
-
-    Optional override:
-      - env ATS_ALLOWLISTS_DIR=/absolute/or/relative/path
+    Examples:
+    - "SQL Server" -> "sql server"
+    - "ASP.NET"    -> "asp.net"
+    - ".NET"       -> ".net"
+    - "C#"         -> "c#"
     """
-    override = (os.getenv("ATS_ALLOWLISTS_DIR") or "").strip()
-    if override:
-        p = Path(override).expanduser().resolve()
-        if p.is_dir():
-            return p
+    s = (s or "").strip().casefold()
+    s = _KEEP_RE.sub(" ", s)
+    s = _WS_RE.sub(" ", s).strip()
+    return s
 
-    root = _repo_root()
+
+def _find_compiled_dir() -> Optional[Path]:
+    """
+    Where compiled allowlists live.
+
+    Expected files:
+      - tech_allowlist.txt
+      - tech_aliases.json
+      - skills_allowlist.txt
+      - skills_aliases.json
+
+    Default location:
+      ats_parser/compiled/
+    """
+    here = Path(__file__).resolve().parent
     candidates = [
-        root / "data" / "allowlists" / "compiled",
-        root / "compiled",
+        here / "compiled",
+        Path.cwd() / "ats_parser" / "compiled",
+        Path.cwd() / "compiled",
     ]
-    for c in candidates:
-        if c.is_dir():
-            return c
-
+    for d in candidates:
+        if d.exists() and d.is_dir():
+            return d
     return None
 
 
-def _read_txt_lines(path: Path) -> list[str]:
-    if not path.exists():
-        return []
-    out: list[str] = []
-    seen: set[str] = set()
-    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        s = (raw or "").strip()
-        if not s or s.startswith("#"):
-            continue
-        k = s.casefold()
-        if k not in seen:
-            seen.add(k)
-            out.append(s)
-    return out
-
-
-def _read_json(path: Path) -> Any:
-    if not path.exists():
-        return None
+def _read_allowlist_txt(path: Path) -> List[str]:
+    values: List[str] = []
     try:
-        return json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = (raw or "").strip()
+            if not line or line.startswith("#"):
+                continue
+            values.append(line)
     except Exception:
-        return None
+        return []
+    return values
 
 
-def load_allowlists() -> tuple[list[str] | None, dict[str, str], list[str] | None, dict[str, str]]:
+def _read_aliases_json(path: Path) -> Dict[str, str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            # Normalize keys so lookups use _norm_key() consistently
+            out: Dict[str, str] = {}
+            for k, v in data.items():
+                if not isinstance(k, str) or not isinstance(v, str):
+                    continue
+                out[_norm_key(k)] = v.strip()
+            return out
+    except Exception:
+        pass
+    return {}
+
+
+def _load_allowlist_pair(
+    allowlist_filename: str,
+    aliases_filename: str,
+    *,
+    min_enable_count: int = 200,
+) -> Tuple[bool, Dict[str, str], Dict[str, str]]:
     """
     Returns:
-      (TECH_ALLOWLIST, TECH_ALIASES, SKILLS_ALLOWLIST, SKILLS_ALIASES)
-
-    If compiled allowlists are missing, TECH_ALLOWLIST/SKILLS_ALLOWLIST will be None
-    (so callers can fall back to permissive parsing).
+      enabled: bool
+      canon_by_key: { normalized_key -> canonical_value }
+      alias_to_canon: { normalized_alias_key -> canonical_value }
     """
-    global _CACHE
-    if _CACHE is not None:
-        return _CACHE
-
     compiled = _find_compiled_dir()
     if not compiled:
-        _CACHE = (None, {}, None, {})
-        return _CACHE
+        return False, {}, {}
 
-    tech_allow = _read_txt_lines(compiled / "tech_allowlist.txt")
-    tech_aliases_raw = _read_json(compiled / "tech_aliases.json")
+    allow_path = compiled / allowlist_filename
+    alias_path = compiled / aliases_filename
 
-    skills_allow = _read_txt_lines(compiled / "skills_allowlist.txt")
-    skills_aliases_raw = _read_json(compiled / "skills_aliases.json")
+    values = _read_allowlist_txt(allow_path) if allow_path.exists() else []
+    aliases = _read_aliases_json(alias_path) if alias_path.exists() else {}
 
-    tech_aliases: dict[str, str] = {}
-    if isinstance(tech_aliases_raw, dict):
-        for k, v in tech_aliases_raw.items():
-            kk = (k or "").strip()
-            vv = (v or "").strip()
-            if kk and vv:
-                tech_aliases[kk.casefold()] = vv
+    canon_by_key = {_norm_key(v): v for v in values if (v or "").strip()}
+    alias_to_canon: Dict[str, str] = {}
 
-    skills_aliases: dict[str, str] = {}
-    if isinstance(skills_aliases_raw, dict):
-        for k, v in skills_aliases_raw.items():
-            kk = (k or "").strip()
-            vv = (v or "").strip()
-            if kk and vv:
-                skills_aliases[kk.casefold()] = vv
+    for alias_key, canon in aliases.items():
+        if not canon:
+            continue
+        # Prefer canonical if present; otherwise still allow it (but canonical string must be non-empty)
+        alias_to_canon[alias_key] = canon
 
-    TECH_ALLOWLIST = tech_allow if tech_allow else None
-    SKILLS_ALLOWLIST = skills_allow if skills_allow else None
-
-    _CACHE = (TECH_ALLOWLIST, tech_aliases, SKILLS_ALLOWLIST, skills_aliases)
-    return _CACHE
+    enabled = len(canon_by_key) >= min_enable_count
+    return enabled, canon_by_key, alias_to_canon
 
 
-# Export module-level constants (what your rules.py optional import expects).
+@lru_cache(maxsize=1)
+def _load_compiled_tech_allowlists() -> Tuple[bool, Dict[str, str], Dict[str, str]]:
+    return _load_allowlist_pair("tech_allowlist.txt", "tech_aliases.json")
+
+
+@lru_cache(maxsize=1)
+def _load_compiled_skills_allowlists() -> Tuple[bool, Dict[str, str], Dict[str, str]]:
+    return _load_allowlist_pair("skills_allowlist.txt", "skills_aliases.json")
+
+
+def _split_on_separators(s: str) -> List[str]:
+    """
+    Split a 'Tech:' tail or a tech-ish chunk into tokens.
+    Keeps multi-word items intact if comma-separated (e.g., 'SQL Server').
+    """
+    if not s:
+        return []
+    # Normalize common separators into commas
+    s = s.replace("•", ",").replace("·", ",").replace("|", ",").replace("/", ",").replace(";", ",")
+    # Also split on long dashes used as separators
+    s = s.replace("—", ",").replace("–", ",")
+    return [t.strip() for t in s.split(",") if t.strip()]
+
+
+def extract_technologies_from_text(text_or_lines) -> List[str]:
+    """
+    Allowlist-only technology extraction.
+    - If compiled allowlist is not 'enabled' (too small/missing), returns [].
+    - Otherwise, returns canonical tech strings.
+    """
+    enabled, canon_by_key, alias_to_canon = _load_compiled_tech_allowlists()
+    if not enabled:
+        return []
+
+    if isinstance(text_or_lines, list):
+        text = "\n".join([str(x) for x in text_or_lines if x is not None])
+    else:
+        text = str(text_or_lines or "")
+
+    found: List[str] = []
+    seen: set[str] = set()
+
+    for tok in _split_on_separators(text):
+        key = _norm_key(tok)
+        canon = alias_to_canon.get(key) or canon_by_key.get(key)
+        if not canon:
+            continue
+        ck = canon.casefold()
+        if ck not in seen:
+            seen.add(ck)
+            found.append(canon)
+
+    return found
+
+
+# ------------------------------------------------------------
+# Backward-compatible exports (what rules.py optional import expects)
+# ------------------------------------------------------------
+
+def load_allowlists():
+    """
+    Legacy/simple loader:
+      returns (TECH_ALLOWLIST, TECH_ALIASES, SKILLS_ALLOWLIST, SKILLS_ALIASES)
+
+    Where:
+      TECH_ALLOWLIST is a list[str] (canonical values) or None
+      TECH_ALIASES   is dict[norm_key(alias) -> canonical]
+    """
+    tech_enabled, tech_canon_by_key, tech_alias_to_canon = _load_compiled_tech_allowlists()
+    skills_enabled, skills_canon_by_key, skills_alias_to_canon = _load_compiled_skills_allowlists()
+
+    tech_list = sorted(set(tech_canon_by_key.values())) if tech_enabled else None
+    skills_list = sorted(set(skills_canon_by_key.values())) if skills_enabled else None
+
+    return tech_list, tech_alias_to_canon, skills_list, skills_alias_to_canon
+
+
 TECH_ALLOWLIST, TECH_ALIASES, SKILLS_ALLOWLIST, SKILLS_ALIASES = load_allowlists()
 
 __all__ = [
@@ -2631,6 +2740,7 @@ __all__ = [
     "TECH_ALIASES",
     "SKILLS_ALLOWLIST",
     "SKILLS_ALIASES",
+    "extract_technologies_from_text",
     "load_allowlists",
 ]
 
@@ -2642,129 +2752,122 @@ __all__ = [
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .parser import parse_text
 from .sections import split_sections
 
 
-def _preview_lines(lines: List[str], max_lines: int = 6) -> List[str]:
-    out: List[str] = []
-    for s in lines:
-        s = (s or "").strip()
-        if s:
-            out.append(s)
-        if len(out) >= max_lines:
-            break
-    return out
-
-
-def debug_parse_text(
-    text: str,
-    *,
-    section_preview_lines: int = 6,
-    section_max_chars: int = 400,
-) -> Dict[str, Any]:
+def debug_parse_text(text: str) -> dict[str, Any]:
     """
-    Return a deterministic debug snapshot for a resume parse.
+    Debug helper to inspect what the parser extracted.
 
-    - Does NOT print (caller decides).
-    - Safe to call from tests/scripts/routes.
-    - Uses the same parsing entrypoint as production (parse_text).
-
-    Returns a dict with:
-      - section keys + short previews
-      - counts (skills/experience/projects/education)
-      - experience summaries (title/company/location/dates/bullets/tech)
-      - warnings/flags (if present on Resume model)
+    NOTE:
+    - ProjectItem fields are: title, role, tech_stack, links, dates, bullets
+    - Contact fields are: name, email, phone, websites
     """
-    secs = split_sections(text)
     resume = parse_text(text)
+    secs = split_sections(text)
 
-    # Sections snapshot
-    sections_out: Dict[str, Any] = {}
-    for key, lines in secs.items():
-        preview = _preview_lines(lines, max_lines=section_preview_lines)
-        joined = "\n".join(preview)
-        if len(joined) > section_max_chars:
-            joined = joined[:section_max_chars].rstrip() + "…"
-        sections_out[key] = {
-            "line_count": len(lines),
-            "preview": joined,
-        }
+    # show both uppercase + lowercase views, but keep original dict
+    sections_out: dict[str, list[str]] = {}
+    for k, v in (secs or {}).items():
+        if isinstance(k, str) and isinstance(v, list):
+            sections_out[k] = v
 
-    # Experience snapshot
-    exp_out: List[Dict[str, Any]] = []
-    for e in resume.experience or []:
-        # tolerate model differences across versions (dates may be nested)
+    # ----- EXPERIENCE SNAPSHOT -----
+    exp_out = []
+    for e in (resume.experience or []):
+        bullets = list(getattr(e, "bullets", []) or [])
+        tech = list(getattr(e, "technologies", []) or [])
         dates = getattr(e, "dates", None)
+
         exp_out.append(
             {
                 "title": getattr(e, "title", "") or "",
                 "company": getattr(e, "company", "") or "",
                 "location": getattr(e, "location", "") or "",
-                "start": getattr(dates, "start", None) if dates else None,
-                "end": getattr(dates, "end", None) if dates else None,
-                "months": getattr(dates, "months", None) if dates else None,
-                "bullets_count": len(getattr(e, "bullets", []) or []),
-                "bullets_preview": (getattr(e, "bullets", []) or [])[:3],
-                "technologies_count": len(getattr(e, "technologies", []) or []),
-                "technologies_preview": (getattr(e, "technologies", []) or [])[:10],
+                "start": getattr(dates, "start", "") if dates else "",
+                "end": getattr(dates, "end", "") if dates else "",
+                "months": getattr(dates, "months", 0) if dates else 0,
+                "bullets_count": len(bullets),
+                "bullets_preview": bullets[:3],
+                "technologies_count": len(tech),
+                "technologies_preview": tech[:10],
             }
         )
 
-    # Projects snapshot (if present)
-    projects = getattr(resume, "projects", None) or []
-    proj_out: List[Dict[str, Any]] = []
+    # ----- PROJECTS SNAPSHOT -----
+    projects = list(getattr(resume, "projects", []) or [])
+    proj_out = []
     for p in projects:
+        bullets = list(getattr(p, "bullets", []) or [])
+        tech_stack = list(getattr(p, "tech_stack", []) or [])
+        links = list(getattr(p, "links", []) or [])
+        dates = getattr(p, "dates", None)
+
+        # Backward-compatible fallbacks (in case older objects exist)
+        title = getattr(p, "title", None) or getattr(p, "name", "") or ""
+        tech_stack = tech_stack or list(getattr(p, "technologies", []) or [])
+        links = links or list(getattr(p, "urls", []) or [])
+
         proj_out.append(
             {
-                "name": getattr(p, "name", "") or "",
+                "title": title,
                 "role": getattr(p, "role", "") or "",
-                "technologies_count": len(getattr(p, "technologies", []) or []),
-                "technologies_preview": (getattr(p, "technologies", []) or [])[:10],
-                "bullets_count": len(getattr(p, "bullets", []) or []),
-                "bullets_preview": (getattr(p, "bullets", []) or [])[:3],
+                "start": getattr(dates, "start", "") if dates else "",
+                "end": getattr(dates, "end", "") if dates else "",
+                "tech_stack_count": len(tech_stack),
+                "tech_stack_preview": tech_stack[:15],
+                "links": links,
+                "bullets_count": len(bullets),
+                "bullets_preview": bullets[:3],
             }
         )
 
-    # Education snapshot (if present)
-    education = getattr(resume, "education", None) or []
-    edu_out: List[Dict[str, Any]] = []
+    # ----- EDUCATION SNAPSHOT -----
+    education = list(getattr(resume, "education", []) or [])
+    edu_out = []
     for ed in education:
+        dates = getattr(ed, "dates", None)
         edu_out.append(
             {
-                "school": getattr(ed, "school", "") or "",
                 "degree": getattr(ed, "degree", "") or "",
-                "start": getattr(ed, "start", None),
-                "end": getattr(ed, "end", None),
+                "field": getattr(ed, "field", "") or "",
+                "school": getattr(ed, "school", "") or "",
+                "location": getattr(ed, "location", "") or "",
+                "start": getattr(dates, "start", "") if dates else "",
+                "end": getattr(dates, "end", "") if dates else "",
             }
         )
 
-    # Flags/warnings snapshot (if present)
+    # ----- FLAGS -----
+    flags_out: dict[str, Any] = {}
     flags = getattr(resume, "flags", None)
-    flags_out: Optional[Dict[str, Any]] = None
-    if flags is not None:
-        # flags might be a pydantic model or dataclass; try both
-        try:
-            flags_out = flags.model_dump()  # pydantic v2
-        except Exception:
+    if flags:
+        if isinstance(flags, dict):
+            flags_out = flags
+        else:
             try:
-                flags_out = flags.dict()  # pydantic v1
+                flags_out = asdict(flags)  # dataclass
             except Exception:
-                try:
-                    flags_out = asdict(flags)  # dataclass
-                except Exception:
-                    flags_out = {"raw": str(flags)}
+                flags_out = {"raw": str(flags)}
+
+    # ----- CONTACT -----
+    c = getattr(resume, "contact", None)
+    websites = []
+    if c:
+        websites = getattr(c, "websites", None) or getattr(c, "links", None) or []
+    contact_out = {
+        "name": getattr(c, "name", "") if c else "",
+        "email": getattr(c, "email", "") if c else "",
+        "phone": getattr(c, "phone", "") if c else "",
+        "websites": websites or [],
+    }
 
     return {
         "sections": sections_out,
-        "contact": {
-            "name": getattr(getattr(resume, "contact", None), "name", "") or "",
-            "email": getattr(getattr(resume, "contact", None), "email", "") or "",
-            "phone": getattr(getattr(resume, "contact", None), "phone", "") or "",
-            "links": getattr(getattr(resume, "contact", None), "links", []) or [],
-        },
+        "contact": contact_out,
         "counts": {
             "skills": len(getattr(resume, "skills", []) or []),
             "experience": len(resume.experience or []),
@@ -2784,72 +2887,73 @@ def debug_parse_text(
 ================================================================================
 
 from __future__ import annotations
+
 import importlib
+import os
+import re
+import unicodedata
 from functools import lru_cache
 from typing import Tuple
 
-# Robust PyMuPDF import:
-# Some environments accidentally install the PyPI package named "fitz" (NOT PyMuPDF),
-# which can shadow PyMuPDF's expected API in some setups.
-try:
-    import fitz  # PyMuPDF typically exposes this name
-except Exception:  # pragma: no cover
-    fitz = None
-
-if fitz is None or not hasattr(fitz, "open"):
-    try:
-        import pymupdf as fitz  # fallback for some versions
-    except Exception:  # pragma: no cover
-        fitz = None
-
-if fitz is None or not hasattr(fitz, "open"):
-    raise ImportError(
-        "PyMuPDF is required. If you installed the wrong 'fitz' package, run:\n"
-        "  pip uninstall fitz -y\n"
-        "  pip install PyMuPDF"
-    )
-
-# keep the rest of your existing imports below (re, os, pdfplumber, etc.)
-
-import os, re, unicodedata
-from typing import Tuple
-import fitz  # PyMuPDF
-import pdfplumber
-
 USE_OCR = os.getenv("USE_OCR", "0") == "1"
-OCR_LANGS = (os.getenv("OCR_LANGS", "en").split(","))
-@lru_cache(maxsize=1)
-def _get_mupdf():
-    # Prefer modern PyMuPDF import if available
-    try:
-        mupdf = importlib.import_module("pymupdf")
-        if hasattr(mupdf, "open"):
-            return mupdf
-    except Exception:
-        pass
-
-    # Fallback: classic import name
-    try:
-        fitz = importlib.import_module("fitz")
-        if hasattr(fitz, "open"):
-            return fitz
-    except Exception:
-        pass
-
-    raise ImportError("PyMuPDF is not installed. Install 'PyMuPDF' to enable PDF parsing.")
+OCR_LANGS = os.getenv("OCR_LANGS", "en").split(",")
+OCR_PAGE_LIMIT = int(os.getenv("OCR_PAGE_LIMIT", "3"))
 
 
 def _norm_ws(s: str) -> str:
     if not s:
         return ""
     s = s.replace("\ufeff", "")
-    s = "".join(" " if (ch.isspace() or unicodedata.category(ch) == "Zs") else ch for ch in s)
+    s = "".join(
+        " " if (ch.isspace() or unicodedata.category(ch) == "Zs") else ch for ch in s
+    )
     return re.sub(r"\s+", " ", s).strip()
+
+
+@lru_cache(maxsize=1)
+def _get_mupdf():
+    """
+    Return the real PyMuPDF module.
+    Must NOT fail at import-time for the package; only fail when PDF parsing is requested.
+    """
+    for name in ("pymupdf", "fitz"):
+        try:
+            mod = importlib.import_module(name)
+            if hasattr(mod, "open"):
+                return mod
+        except Exception:
+            continue
+
+    raise ImportError(
+        "PyMuPDF is required for PDF parsing. If you installed the wrong 'fitz' package, run:\n"
+        "  pip uninstall fitz -y\n"
+        "  pip install PyMuPDF"
+    )
+
+
+def _get_pdfplumber():
+    try:
+        return importlib.import_module("pdfplumber")
+    except Exception:
+        return None
+
+
+_ocr_reader = None
+
+
+def _get_ocr():
+    global _ocr_reader
+    if _ocr_reader is None:
+        easyocr = importlib.import_module("easyocr")  # lazy
+        _ocr_reader = easyocr.Reader(OCR_LANGS, gpu=False)
+    return _ocr_reader
+
 
 def _page_blocks_sorted(page):
     blocks = page.get_text("blocks") or []
-    blocks.sort(key=lambda b: (round(b[1],1), round(b[0],1)))
+    blocks.sort(key=lambda b: (round(b[1], 1), round(b[0], 1)))
     return blocks
+
 
 def _blocks_to_text(blocks):
     lines = []
@@ -2859,43 +2963,64 @@ def _blocks_to_text(blocks):
             lines.append(t)
     return "\n".join(lines)
 
-_ocr_reader = None
-def _get_ocr():
-    global _ocr_reader
-    if _ocr_reader is None:
-        import easyocr  # lazy
-        _ocr_reader = easyocr.Reader(OCR_LANGS, gpu=False)
-    return _ocr_reader
+
+def _matrix_prerotate(mupdf, rotation_deg: int):
+    mat = mupdf.Matrix(300 / 72, 300 / 72)
+    rot = rotation_deg % 360
+
+    # PyMuPDF API differences across versions
+    if hasattr(mat, "preRotate"):
+        return mat.preRotate(rot)
+    if hasattr(mat, "prerotate"):
+        return mat.prerotate(rot)
+
+    return mat
+
 
 def read_pdf_text(path: str) -> Tuple[str, int]:
-    """Return (text, ocr_pages_used). Uses blocks; falls back to text/ocr/pdfplumber."""
-    fitz = _get_mupdf()
-    doc = fitz.open(path)
-    assembled, ocr_count = [], 0
+    """
+    Return (text, ocr_pages_used).
+    Uses PyMuPDF blocks; falls back to page text; optional OCR; optional pdfplumber rescue.
+    """
+    mupdf = _get_mupdf()
+    doc = mupdf.open(path)
+
+    assembled = []
+    ocr_count = 0
+
     for i, page in enumerate(doc):
         raw = _blocks_to_text(_page_blocks_sorted(page)) or (page.get_text("text") or "")
-        if len(_norm_ws(raw)) < 120 and USE_OCR:
-            # high-res pix + OCR
-            mat = fitz.Matrix(300/72, 300/72).preRotate((page.rotation or 0)%360)
+
+        if (
+            USE_OCR
+            and len(_norm_ws(raw)) < 120
+            and ocr_count < OCR_PAGE_LIMIT
+        ):
+            mat = _matrix_prerotate(mupdf, int(getattr(page, "rotation", 0) or 0))
             pix = page.get_pixmap(matrix=mat, alpha=False)
             img = pix.tobytes("png")
             reader = _get_ocr()
             lines = reader.readtext(img, detail=0, paragraph=True)
             raw = "\n".join(l.strip() for l in lines if l and l.strip())
             ocr_count += 1
+
         assembled.append(raw)
+
     doc.close()
+
     text = "\n".join(assembled).strip()
 
-    # rescue with pdfplumber if still sparse
+    # Optional rescue with pdfplumber if still sparse
     if len(_norm_ws(text)) < 120:
-        try:
-            with pdfplumber.open(path) as pdf:
-                text2 = "\n".join((p.extract_text() or "") for p in pdf.pages)
-            if len(_norm_ws(text2)) > len(_norm_ws(text)):
-                text = text2
-        except Exception:
-            pass
+        pdfplumber = _get_pdfplumber()
+        if pdfplumber is not None:
+            try:
+                with pdfplumber.open(path) as pdf:
+                    text2 = "\n".join((p.extract_text() or "") for p in pdf.pages)
+                if len(_norm_ws(text2)) > len(_norm_ws(text)):
+                    text = text2
+            except Exception:
+                pass
 
     return (text or "") + "\n", ocr_count
 
@@ -3143,52 +3268,24 @@ class Resume(BaseModel):
 ================================================================================
 
 from __future__ import annotations
-
-from typing import List
-import os
-import tempfile
-
-from .models import (
-    Resume,
-    Contact,
-    ExperienceItem,
-    EducationItem,
-    DateSpan,
-    ProjectItem,
-)
 from .ingest import read_pdf_text
+import os
+import re
+import tempfile
+from typing import List
+
+from .llm import extract_education_llm, extract_experience_llm
+from .models import (
+    Contact,
+    DateSpan,
+    EducationItem,
+    ExperienceItem,
+    ProjectItem,
+    Resume,
+)
+from .reconcile import merge_experience, postprocess_experience
 from .sections import split_sections
 from . import rules
-from .llm import extract_experience_llm, extract_education_llm
-from .reconcile import merge_experience, postprocess_experience
-
-
-def _split_name(full: str):
-    s = (full or "").strip()
-    if not s:
-        return "", "", ""
-    parts = s.split()
-    if len(parts) == 1:
-        return parts[0], "", ""
-    if len(parts) == 2:
-        return parts[0], "", parts[1]
-    return parts[0], " ".join(parts[1:-1]), parts[-1]
-# ats_parser/parser.py
-
-from __future__ import annotations
-
-import re
-from typing import Any
-
-from .sections import split_sections
-from .rules import (
-    extract_contacts,
-    extract_skills_from_text,
-    fallback_education,
-    fallback_experience,
-    fallback_projects,
-)
-from .models import Resume  # keep your existing imports / model names
 
 
 # Headings your splitter recognizes (case-sensitive on purpose).
@@ -3204,6 +3301,7 @@ _INLINE_HEADINGS = (
     "LANGUAGES",
 )
 
+
 def _inject_inline_section_breaks(text: str) -> str:
     """
     Some PDF extractors concatenate content like:
@@ -3217,39 +3315,39 @@ def _inject_inline_section_breaks(text: str) -> str:
     for h in _INLINE_HEADINGS:
         # Insert newline before " <HEADING>" when it is not already at a line start.
         # Case-sensitive: avoids splitting normal sentence usage like "projects" / "experience".
-        text = re.sub(rf"(?<!\n)(?<=\S)\s+{h}\b", f"\n{h}", text)
+        text = re.sub(rf"(?<=.)(?<!\n)(?<!\w)\s*{h}\b", f"\n{h}", text)
+
 
     return text
 
 
-def parse_text(text: str) -> Resume:
-    # NEW: normalize inline headings before section splitting
-    text = _inject_inline_section_breaks(text)
-
-    secs = split_sections(text)
-
-    contact = extract_contacts(text)
-
-    skills = extract_skills_from_text("\n".join(secs.get("SKILLS", [])))
-
-    experience_items = fallback_experience(secs.get("EXPERIENCE", []))
-    projects_items = fallback_projects(secs.get("PROJECTS", []))
-    education_items = fallback_education(secs.get("EDUCATION", []))
-
-    # keep the rest of your existing Resume construction code unchanged
-    return Resume(
-        contact=contact,
-        skills=skills,
-        experience=experience_items,
-        projects=projects_items,
-        education=education_items,
-    )
+def _split_name(full: str):
+    s = (full or "").strip()
+    if not s:
+        return "", "", ""
+    parts = s.split()
+    if len(parts) == 1:
+        return parts[0], "", ""
+    if len(parts) == 2:
+        return parts[0], "", parts[1]
+    return parts[0], " ".join(parts[1:-1]), parts[-1]
 
 
 def parse_text(text: str, *, ocr_pages: int = 0) -> Resume:
+    # Normalize PDF text first, then split.
+    text = _inject_inline_section_breaks(text)
     secs = split_sections(text)
 
     warnings: list[str] = []
+
+    # ----- CONTACTS -----
+    contacts = rules.extract_contacts(text)
+
+    # ----- SKILLS -----
+    skills_list = rules.extract_skills(secs.get("SKILLS", []))
+    if not skills_list:
+        # fallback if the splitter missed the section heading
+        skills_list = rules.extract_skills_from_text(text)
 
     # ----- PROJECTS -----
     projects_lines = secs.get("PROJECTS") or []
@@ -3257,7 +3355,7 @@ def parse_text(text: str, *, ocr_pages: int = 0) -> Resume:
         projects_lines = [x.strip() for x in projects_lines.splitlines() if x.strip()]
 
     try:
-        # split_sections() usually returns the section content WITHOUT the header line,
+        # split_sections() usually returns section content WITHOUT the header line,
         # but extract_projects() expects to see a Projects heading to "arm" the parser.
         projects_raw = rules.extract_projects(["PROJECTS"] + (projects_lines or []))
         projects = [ProjectItem(**p) for p in (projects_raw or [])]
@@ -3267,15 +3365,6 @@ def parse_text(text: str, *, ocr_pages: int = 0) -> Resume:
 
     if projects_lines and not projects:
         warnings.append("Projects section present but no projects were extracted.")
-
-
-    # ----- CONTACTS + SKILLS -----
-    contacts = rules.extract_contacts(text)
-
-    skills_list = rules.extract_skills(secs.get("SKILLS", []))
-    if not skills_list:
-        # fallback if the splitter missed the section heading
-        skills_list = rules.extract_skills_from_text(text)
 
     # ----- EXPERIENCE (RULES) -----
     exp_text = "\n".join(secs.get("EXPERIENCE") or [])
@@ -3309,7 +3398,7 @@ def parse_text(text: str, *, ocr_pages: int = 0) -> Resume:
             for it in rules.fallback_experience(text)
         ]
 
-    # ----- EDUCATION -----
+    # ----- EDUCATION (RULES) -----
     edu_lines = secs.get("EDUCATION") or []
     edu_rule = [
         EducationItem(
@@ -3323,7 +3412,7 @@ def parse_text(text: str, *, ocr_pages: int = 0) -> Resume:
         for it in (rules.fallback_education(edu_lines) if edu_lines else [])
     ]
 
-    # LLM extraction (best-effort)
+    # ----- LLM EDUCATION (best-effort) -----
     try:
         edu_llm: List[EducationItem] = extract_education_llm("\n".join(edu_lines)) or []
     except Exception as e:
@@ -3333,7 +3422,7 @@ def parse_text(text: str, *, ocr_pages: int = 0) -> Resume:
     # Prefer deterministic rules; fall back to LLM only if rules found nothing
     education = edu_rule or edu_llm
 
-    # ----- EXPERIENCE (LLM) + MERGE -----
+    # ----- LLM EXPERIENCE (best-effort) + MERGE -----
     try:
         exp_llm: List[ExperienceItem] = extract_experience_llm(exp_text) or []
     except Exception as e:
@@ -3342,7 +3431,6 @@ def parse_text(text: str, *, ocr_pages: int = 0) -> Resume:
 
     experience = merge_experience(exp_rule, exp_llm)
     experience = postprocess_experience(experience)
-
 
     # ----- FLAGS -----
     # Only count uppercase buckets (the splitter also returns lowercase string views)
@@ -3376,9 +3464,12 @@ def parse_text(text: str, *, ocr_pages: int = 0) -> Resume:
     )
     return resume
 
+
 def parse_file(path: str) -> Resume:
     text, ocr_pages = read_pdf_text(path)
     return parse_text(text, ocr_pages=ocr_pages)
+
+
 
 def parse_bytes(data: bytes) -> Resume:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -3435,6 +3526,9 @@ def adapt_for_backend(resume: Resume) -> dict:
     # Flatten projects (for later UI)
     proj_flat = []
     for p in getattr(resume, "projects", []) or []:
+        desc = "\n".join(p.bullets or []).strip()
+        if not desc:
+            desc = (p.role or "").strip()
         proj_flat.append(
             {
                 "title": p.title or "",
@@ -3443,7 +3537,7 @@ def adapt_for_backend(resume: Resume) -> dict:
                 "end_date": (p.dates.end or "") if p.dates else "",
                 "tech_stack": ", ".join(p.tech_stack or []),
                 "links": [str(u) for u in (p.links or [])],
-                "description": "\n".join(p.bullets or []).strip(),
+                "description": desc,
             }
         )
 
@@ -3608,6 +3702,7 @@ def postprocess_experience(items: List[ExperienceItem]) -> List[ExperienceItem]:
 ================================================================================
 
 from __future__ import annotations
+import os
 import re
 from typing import List, Tuple
 from datetime import datetime
@@ -4065,6 +4160,88 @@ def fallback_experience(text_or_lines) -> list[dict]:
                 if 1 <= len(t.split()) <= 4 and not t.endswith("."):
                     toks.append(t)
         return toks
+    
+
+    _TECH_TOKEN_RE = re.compile(r"\.NET|[A-Za-z0-9]+(?:[.+#-][A-Za-z0-9]+)*")
+
+    def _extract_tech_from_sentence(sentence: str) -> list[str]:
+        """
+        Mine technologies from a normal sentence/bullet like:
+            "Built APIs with ASP.NET using C# and SQL Server."
+        Uses allowlist if enabled; otherwise uses a conservative heuristic.
+        """
+        if not sentence:
+            return []
+
+        s = sentence.strip()
+        spans: list[str] = []
+
+        # Pull "techy" parts of the sentence
+        # 1) after common triggers
+        triggers = [
+            "using",
+            "with",
+            "built with",
+            "stack",
+            "tech",
+            "technologies",
+            "tools",
+            "frameworks",
+        ]
+        low = s.lower()
+        for t in triggers:
+            pos = low.find(t)
+            if pos != -1:
+                spans.append(s[pos + len(t) :].strip(" :.-—|"))
+
+        # 2) inside parentheses
+        spans.extend(re.findall(r"\(([^)]{1,120})\)", s))
+
+        # 3) if it looks list-like, scan the whole line too
+        if s.count(",") >= 2 or any(ch in s for ch in ("#", ".", "+")):
+            spans.append(s)
+
+        # Always include the original sentence as last resort,
+        # but we'll filter aggressively in allowlist mode anyway.
+        spans.append(s)
+
+        found: list[str] = []
+        seen_local: set[str] = set()
+
+        def _push(val: str):
+            k = (val or "").casefold()
+            if k and k not in seen_local:
+                seen_local.add(k)
+                found.append(val)
+
+        for span in spans:
+            toks = _TECH_TOKEN_RE.findall(span)
+            if not toks:
+                continue
+
+            # Build n-grams up to 3 tokens ("SQL Server", "ASP .NET" won't happen but "SQL Server" will)
+            max_n = 3
+            for ngram_size in range(max_n, 0, -1):
+                for i0 in range(0, len(toks) - ngram_size + 1):
+                    cand = " ".join(toks[i0 : i0 + ngram_size]).strip()
+                    if not cand:
+                        continue
+
+                    if tech_allow_enabled:
+                        key = _norm_key(cand)
+                        canon = tech_alias_to_canon.get(key) or tech_canon_by_key.get(key)
+                        if canon:
+                            _push(canon)
+                    else:
+                        # Conservative fallback: keep only "tech-looking" tokens
+                        # - contains # . + or is multi-word
+                        if any(ch in cand for ch in ("#", ".", "+")) or " " in cand:
+                            if 1 <= len(cand.split()) <= 4 and not cand.endswith("."):
+                                _push(cand)
+
+        return found
+
+
 
     def gather_desc(start_idx: int, n: int):
         """
@@ -4216,6 +4393,10 @@ def fallback_experience(text_or_lines) -> list[dict]:
         technologies: list[str] = []
         tech_seen: set[str] = set()
 
+        if bullets:
+            for t in extract_technologies_from_text(" ".join(bullets)):
+                _add_unique(technologies, tech_seen, t)
+
         for raw in desc_lines:
             s = norm(raw)
             if not s:
@@ -4237,10 +4418,14 @@ def fallback_experience(text_or_lines) -> list[dict]:
                 b = BULLET.sub("", s).strip()
                 if b:
                     bullets.append(b)
+                    for t in _mine_tech_from_text(b, tech_allow_enabled, tech_canon_by_key, tech_alias_to_canon):
+                        _add_unique(technologies, tech_seen, t)
             else:
                 # treat short non-header lines as bullet-like description
                 if 0 < len(s) <= 200:
                     bullets.append(s)
+                    for t in _extract_tech_from_sentence(s):
+                        _add_unique(technologies, tech_seen, t)
 
         if title or company or bullets or technologies:
             items.append(
@@ -4838,6 +5023,70 @@ def _load_compiled_tech_allowlists():
     setattr(_load_compiled_tech_allowlists, "_cache", cached)
     return cached
 
+def _tokenize_for_tech(text: str) -> list[str]:
+    """
+    Tokenizer that preserves tech punctuation like '.', '+', '#'.
+    Examples:
+      "ASP.NET" -> ["ASP.NET"]
+      "C#"      -> ["C#"]
+      "SQL Server." -> ["SQL", "Server"]
+    """
+    if not text:
+        return []
+    # Keep letters/digits and . + # ; convert everything else to spaces
+    s = re.sub(r"[^A-Za-z0-9\.\+#]+", " ", text)
+    toks = []
+    for t in s.split():
+        t = t.strip()
+        if not t:
+            continue
+        # Remove trailing sentence punctuation only (keep # and +)
+        t = t.rstrip(".,;:!)?]")
+        t = t.lstrip("([")
+        if t:
+            toks.append(t)
+    return toks
+
+
+def _mine_tech_from_text(text: str, enabled: bool, canon_by_key: dict[str, str], alias_to_canon: dict[str, str]) -> list[str]:
+    """
+    Mine allowlisted technologies from free text (e.g., bullets).
+    Uses n-gram matching so "SQL Server" works, and aliases like "C Sharp" -> "C#".
+    """
+    if not enabled or not text:
+        return []
+
+    toks = _tokenize_for_tech(text)
+    if not toks:
+        return []
+
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def _add(canon: str):
+        k = (canon or "").casefold()
+        if k and k not in seen:
+            seen.add(k)
+            found.append(canon)
+
+    i = 0
+    max_n = 5  # supports phrases like "SQL Server Management Studio"
+    while i < len(toks):
+        matched = False
+        for n in range(min(max_n, len(toks) - i), 0, -1):
+            phrase = " ".join(toks[i : i + n])
+            key = _norm_key(phrase)
+            canon = alias_to_canon.get(key) or canon_by_key.get(key)
+            if canon:
+                _add(canon)
+                i += n
+                matched = True
+                break
+        if not matched:
+            i += 1
+
+    return found
+
 
 # --- Projects extraction ------------------------------------------------------
 
@@ -5119,6 +5368,125 @@ def extract_projects(lines: list[str]) -> list[dict]:
 
     projects: list[dict] = []
     cur: dict | None = None
+    # --- Single-date lines in PROJECTS (PDFs often have: "Nov 2024" on its own line) ---
+    _MONTHS = {
+        "jan": 1, "january": 1,
+        "feb": 2, "february": 2,
+        "mar": 3, "march": 3,
+        "apr": 4, "april": 4,
+        "may": 5,
+        "jun": 6, "june": 6,
+        "jul": 7, "july": 7,
+        "aug": 8, "august": 8,
+        "sep": 9, "sept": 9, "september": 9,
+        "oct": 10, "october": 10,
+        "nov": 11, "november": 11,
+        "dec": 12, "december": 12,
+    }
+
+    _SINGLE_MONTH_YEAR_PREFIX_RE = re.compile(
+        r"^(?P<mon>Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+        r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+        r"\s+(?P<y>\d{4})(?P<rest>.*)$",
+        re.I,
+    )
+    _YEAR_ONLY_PREFIX_RE = re.compile(r"^(?P<y>\d{4})(?P<rest>.*)$")
+
+    def _parse_single_date_prefix(s: str):
+        """
+        Returns (start_yyyy_mm, remaining_text).
+        Examples:
+          "Nov 2024" -> ("2024-11", "")
+          "June 2025 and improve parsing accuracy." -> ("2025-06", "and improve parsing accuracy.")
+          "2024" -> ("2024-01", "")
+        """
+        s = (s or "").strip()
+        if not s:
+            return None, ""
+
+        m = _SINGLE_MONTH_YEAR_PREFIX_RE.match(s)
+        if m:
+            mon = (m.group("mon") or "").strip().lower()
+            y = int(m.group("y"))
+            mm = _MONTHS.get(mon, _MONTHS.get(mon[:3]))
+            rest = (m.group("rest") or "").strip(" -–—•:|")
+            if mm:
+                return f"{y}-{mm:02d}", rest
+            return f"{y}-01", rest
+
+        m = _YEAR_ONLY_PREFIX_RE.match(s)
+        if m:
+            y = int(m.group("y"))
+            rest = (m.group("rest") or "").strip(" -–—•:|")
+            return f"{y}-01", rest
+
+        return None, s
+
+    # NEW: load allowlist once (same approach as experience)
+    tech_allow_enabled, tech_canon_by_key, tech_alias_to_canon = _load_compiled_tech_allowlists()
+
+    # NEW: sentence mining helper
+    _TECH_TOKEN_RE = re.compile(r"\.NET|[A-Za-z0-9]+(?:[.+#-][A-Za-z0-9]+)*")
+
+    def _extract_tech_from_sentence(sentence: str) -> list[str]:
+        """
+        Mine technologies from a normal sentence/bullet like:
+            "Built APIs with ASP.NET using C# and SQL Server."
+        Uses allowlist if enabled; otherwise uses a conservative heuristic.
+        """
+        if not sentence:
+            return []
+
+        s = sentence.strip()
+        spans: list[str] = []
+
+        triggers = ["using", "with", "built with", "stack", "tech", "technologies", "tools", "frameworks"]
+        low = s.lower()
+        for t in triggers:
+            pos = low.find(t)
+            if pos != -1:
+                spans.append(s[pos + len(t) :].strip(" :.-—|"))
+
+        spans.extend(re.findall(r"\(([^)]{1,120})\)", s))
+
+        if s.count(",") >= 2 or any(ch in s for ch in ("#", ".", "+")):
+            spans.append(s)
+
+        spans.append(s)
+
+        found: list[str] = []
+        seen: set[str] = set()
+
+        def _push(val: str):
+            k = (val or "").casefold()
+            if k and k not in seen:
+                seen.add(k)
+                found.append(val)
+
+        for span in spans:
+            toks = _TECH_TOKEN_RE.findall(span)
+            if not toks:
+                continue
+
+            # n-grams up to 3 tokens to catch things like "SQL Server"
+            for ngram_size in (3, 2, 1):
+                for i0 in range(0, len(toks) - ngram_size + 1):
+                    cand = " ".join(toks[i0 : i0 + ngram_size]).strip()
+                    if not cand:
+                        continue
+
+                    if tech_allow_enabled:
+                        key = _norm_key(cand)
+                        canon = tech_alias_to_canon.get(key) or tech_canon_by_key.get(key)
+                        if canon:
+                            _push(canon)
+                    else:
+                        # conservative fallback (avoid random words)
+                        if any(ch in cand for ch in ("#", ".", "+")) or " " in cand:
+                            if 1 <= len(cand.split()) <= 4 and not cand.endswith("."):
+                                _push(cand)
+
+        return found
 
     def _start_new_project(heading_line: str):
         nonlocal cur
@@ -5140,6 +5508,17 @@ def extract_projects(lines: list[str]) -> list[dict]:
 
     # Iterate after the heading line
     for line in raw[1:]:
+        # If we haven't started a project yet, the first non-tech/link/bullet line
+        # is very often the project title (e.g., "Resume Parser").
+        if cur is None:
+            if (
+                not TECH_LINE_RE.match(line)
+                and not LINK_LINE_RE.match(line)
+                and not re.match(r"^[\-\*\u2022]\s+", line)
+                and not PROJECTS_HEAD.match(line)
+            ):
+                _start_new_project(line)
+            continue
         if not line:
             continue
 
@@ -5159,15 +5538,40 @@ def extract_projects(lines: list[str]) -> list[dict]:
         # If we haven't started a project yet, ignore detail lines.
         if cur is None:
             continue
+        # Date-only or date-prefixed line (common in PDFs)
+        # Example lines:
+        #   "Nov 2024"
+        #   "Feb 2025"
+        #   "June 2025 and improve parsing accuracy."
+        if cur.get("dates"):
+            line_no_bullet = re.sub(r"^[\-\*\u2022]\s+", "", line).strip()
+            ym, rest = _parse_single_date_prefix(line_no_bullet)
+
+            if ym:
+                # If start missing -> set start
+                if cur["dates"].get("start") is None:
+                    cur["dates"]["start"] = ym
+                # Else if end missing -> set end
+                elif cur["dates"].get("end") is None:
+                    cur["dates"]["end"] = ym
+                else:
+                    # If both are already set, treat as content (rare)
+                    if rest and rest != "•":
+                        cur["bullets"].append(rest)
+
+                # Keep trailing text (if any) as bullet
+                if rest and rest != "•":
+                    cur["bullets"].append(rest)
+
+                continue
+
 
         # Tech line -> tokenize -> allowlist filter
         mtech = TECH_LINE_RE.match(line)
         if mtech:
             tech_raw = mtech.group(2).strip()
             tokens = _split_on_separators(tech_raw)
-            tech = _filter_tech_allowlist(
-                tokens
-            )  # drops unknown tokens in allowlist mode
+            tech = _filter_tech_allowlist(tokens)  # drops unknown tokens in allowlist mode
             for t in tech:
                 if t not in cur["tech_stack"]:
                     cur["tech_stack"].append(t)
@@ -5186,15 +5590,112 @@ def extract_projects(lines: list[str]) -> list[dict]:
                     cur["links"].append(u)
             continue
 
+        if re.search(r"[|,/;]", line):
+            tokens = _split_on_separators(line)
+            if len(tokens) >= 3:
+                tech = _filter_tech_allowlist(tokens)
+                if tech:
+                    for t in tech:
+                        if t not in cur["tech_stack"]:
+                            cur["tech_stack"].append(t)
+                    continue
         # Bullet / description line
+                # NEW: ignore stray bullet-only lines like "•"
+        if re.match(r"^[\-\*\u2022]\s*$", line):
+            continue
+
+        # NEW: date-only lines inside a project block should become project dates, not bullets
+        # e.g. "Nov 2024" or "June 2025"
+        if DATE_RE.search(line) and len(line) <= 20 and not re.search(r"[—–-]", line):
+            try:
+                s, e, _m = parse_date_range(line)
+            except Exception:
+                s, e = None, None
+
+            if cur.get("dates") is None:
+                cur["dates"] = {"start": None, "end": None}
+
+            # only fill if empty (do not overwrite heading dates)
+            if s and not cur["dates"].get("start"):
+                cur["dates"]["start"] = s
+            if e and not cur["dates"].get("end"):
+                cur["dates"]["end"] = e
+
+            continue
+
+        # NEW: continuation lines (not bullets) should attach to the previous bullet
+        if cur.get("bullets") and not re.match(r"^[\-\*\u2022]\s+", line):
+            if line and (line[0].islower() or line.lower().startswith(("and ", "to ", "for ", "with ", "by "))):
+                cur["bullets"][-1] = (cur["bullets"][-1].rstrip() + " " + line.strip()).strip()
+                continue
+
         b = re.sub(r"^[\-\*\u2022]\s+", "", line).strip()
         if b:
             cur["bullets"].append(b)
 
+            # NEW: mine technologies from normal bullet text
+            for t in _extract_tech_from_sentence(b):
+                if t not in cur["tech_stack"]:
+                    cur["tech_stack"].append(t)
+
+    # Drop empty shells (no title already filtered; this is extra safety)
+
+    # ---- Post-clean bullets: merge dangling fragments like "and improve parsing accuracy."
+    for p in projects:
+        cleaned = []
+        for b in (p.get("bullets") or []):
+            s = (b or "").strip()
+            if not s:
+                continue
+
+            # Merge fragments that start with conjunctions into previous bullet
+            if cleaned and re.match(r"^(and|or|but|with|to)\b", s, flags=re.IGNORECASE):
+                cleaned[-1] = (cleaned[-1].rstrip(".") + " " + s).strip()
+            else:
+                cleaned.append(s)
+
+        p["bullets"] = cleaned
+
+
     # Drop empty shells (no title already filtered; this is extra safety)
     projects = [p for p in projects if p.get("title")]
 
+    # ---- bullet cleanup (prevents dangling fragments like "and improve parsing accuracy.") ----
+    FRAG_RE = re.compile(r"^(and|or|but|with|to)\b", re.IGNORECASE)
+
+    for p in projects:
+        cleaned: list[str] = []
+        for b in (p.get("bullets") or []):
+            s = norm(b)
+            if not s:
+                continue
+
+            # drop lone bullet artifacts
+            if s in {"•", "·", "-", "–", "—"}:
+                continue
+
+            # drop date-only bullets (e.g., "June 2025") if they slipped in
+            try:
+                if DATE_RE.fullmatch(s):
+                    continue
+            except Exception:
+                pass
+
+            # merge or drop dangling fragment bullets
+            if FRAG_RE.match(s):
+                if cleaned:
+                    cleaned[-1] = (cleaned[-1].rstrip() + " " + s).strip()
+                else:
+                    # if it's the first bullet and starts with "and/or/but/with/to", drop it
+                    continue
+            else:
+                cleaned.append(s)
+
+        p["bullets"] = cleaned
+
     return projects
+
+
 
 
 def _split_simple_tokens(s: str) -> list[str]:
@@ -5295,7 +5796,47 @@ def _load_allowlist_pair(base_name: str, aliases_name: str):
 
 
 def _load_compiled_tech_allowlists():
-    return _load_allowlist_pair("tech_allowlist.txt", "tech_aliases.json")
+    """
+    Load compiled tech allowlist + aliases.
+
+    IMPORTANT:
+    - Must enable even for small lists (tests use 3–10 items).
+    - Uses ATS_TECH_ALLOWLIST_DIR if set (tests set this).
+    """
+    allow_dir = os.environ.get("ATS_TECH_ALLOWLIST_DIR")
+    if allow_dir:
+        base = Path(allow_dir)
+    else:
+        # repo root (two levels up from this file)
+        base = Path(__file__).resolve().parent.parent / "data" / "allowlists" / "compiled"
+
+    tech_txt = base / "tech_allowlist.txt"
+    alias_json = base / "tech_aliases.json"
+
+    canon_by_key: dict[str, str] = {}
+    alias_to_canon: dict[str, str] = {}
+
+    if tech_txt.exists():
+        for line in tech_txt.read_text(encoding="utf-8", errors="ignore").splitlines():
+            canon = (line or "").strip()
+            if not canon:
+                continue
+            canon_by_key[_norm_key(canon)] = canon
+
+    if alias_json.exists():
+        try:
+            data = json.loads(alias_json.read_text(encoding="utf-8", errors="ignore") or "{}")
+            if isinstance(data, dict):
+                for alias, canon in data.items():
+                    if not alias or not canon:
+                        continue
+                    alias_to_canon[_norm_key(str(alias))] = str(canon).strip()
+        except Exception:
+            # If aliases file is malformed, just ignore it
+            pass
+
+    enabled = bool(canon_by_key)  # <-- key fix: no size threshold
+    return enabled, canon_by_key, alias_to_canon
 
 
 def _load_compiled_skills_allowlists():
@@ -42135,6 +42676,48 @@ Tech: Python, SQL, FooBarTech
 
 
 ================================================================================
+// Path: tests/test_experience_tech_mining_from_bullets.py
+================================================================================
+
+import json
+from ats_parser.rules import fallback_experience
+
+def test_tech_mined_from_bullets(monkeypatch, tmp_path):
+    compiled = tmp_path / "compiled"
+    compiled.mkdir()
+
+    (compiled / "tech_allowlist.txt").write_text(
+        "C#\nSQL Server\nASP.NET\nDocker\n",
+        encoding="utf-8",
+    )
+    (compiled / "tech_aliases.json").write_text(
+        json.dumps({"c sharp": "C#", "asp net": "ASP.NET"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("ATS_TECH_ALLOWLIST_DIR", str(compiled))
+
+    text = "\n".join([
+        "EXPERIENCE",
+        "Jan 2025 – Present",
+        "Back-end Developer (ASP.NET)",
+        "Machine Builder Inc.",
+        "Montreal, QC",
+        "- Built APIs with ASP.NET using C# and SQL Server.",
+        "- Did some nonsense work.",
+    ])
+
+    items = fallback_experience(text)
+    assert items and items[0].get("technologies")
+
+    tech = items[0]["technologies"]
+    assert "ASP.NET" in tech
+    assert "C#" in tech
+    assert "SQL Server" in tech
+    assert "nonsense" not in tech
+
+
+================================================================================
 // Path: tests/test_parser_pipeline_contract.py
 ================================================================================
 
@@ -42861,4 +43444,4 @@ if __name__ == "__main__":
 
 
 
-// Summary: wrote 57 files, skipped 56276 files.
+// Summary: wrote 58 files, skipped 56329 files.
