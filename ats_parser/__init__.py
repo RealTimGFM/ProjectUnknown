@@ -1,9 +1,5 @@
-﻿from __future__ import annotations
-
-"""
-Hybrid resume parser package (rules + optional LLM/PDF).
-Keep imports lazy so rule-only unit tests do not require PDF dependencies.
-"""
+﻿"""Hybrid resume parser package (rules + optional LLM)."""
+from __future__ import annotations
 
 from . import rules
 
