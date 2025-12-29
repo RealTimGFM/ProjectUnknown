@@ -1,11 +1,10 @@
 from __future__ import annotations
-
+from .ingest import read_pdf_text
 import os
 import re
 import tempfile
 from typing import List
 
-from .ingest import read_pdf_text
 from .llm import extract_education_llm, extract_experience_llm
 from .models import (
     Contact,
@@ -202,6 +201,7 @@ def parse_file(path: str) -> Resume:
     return parse_text(text, ocr_pages=ocr_pages)
 
 
+
 def parse_bytes(data: bytes) -> Resume:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(data)
@@ -257,6 +257,9 @@ def adapt_for_backend(resume: Resume) -> dict:
     # Flatten projects (for later UI)
     proj_flat = []
     for p in getattr(resume, "projects", []) or []:
+        desc = "\n".join(p.bullets or []).strip()
+        if not desc:
+            desc = (p.role or "").strip()
         proj_flat.append(
             {
                 "title": p.title or "",
@@ -265,7 +268,7 @@ def adapt_for_backend(resume: Resume) -> dict:
                 "end_date": (p.dates.end or "") if p.dates else "",
                 "tech_stack": ", ".join(p.tech_stack or []),
                 "links": [str(u) for u in (p.links or [])],
-                "description": "\n".join(p.bullets or []).strip(),
+                "description": desc,
             }
         )
 

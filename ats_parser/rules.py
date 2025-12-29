@@ -1936,9 +1936,62 @@ def extract_projects(lines: list[str]) -> list[dict]:
                     cur["tech_stack"].append(t)
 
     # Drop empty shells (no title already filtered; this is extra safety)
+
+    # ---- Post-clean bullets: merge dangling fragments like "and improve parsing accuracy."
+    for p in projects:
+        cleaned = []
+        for b in (p.get("bullets") or []):
+            s = (b or "").strip()
+            if not s:
+                continue
+
+            # Merge fragments that start with conjunctions into previous bullet
+            if cleaned and re.match(r"^(and|or|but|with|to)\b", s, flags=re.IGNORECASE):
+                cleaned[-1] = (cleaned[-1].rstrip(".") + " " + s).strip()
+            else:
+                cleaned.append(s)
+
+        p["bullets"] = cleaned
+
+
+    # Drop empty shells (no title already filtered; this is extra safety)
     projects = [p for p in projects if p.get("title")]
 
+    # ---- bullet cleanup (prevents dangling fragments like "and improve parsing accuracy.") ----
+    FRAG_RE = re.compile(r"^(and|or|but|with|to)\b", re.IGNORECASE)
+
+    for p in projects:
+        cleaned: list[str] = []
+        for b in (p.get("bullets") or []):
+            s = norm(b)
+            if not s:
+                continue
+
+            # drop lone bullet artifacts
+            if s in {"•", "·", "-", "–", "—"}:
+                continue
+
+            # drop date-only bullets (e.g., "June 2025") if they slipped in
+            try:
+                if DATE_RE.fullmatch(s):
+                    continue
+            except Exception:
+                pass
+
+            # merge or drop dangling fragment bullets
+            if FRAG_RE.match(s):
+                if cleaned:
+                    cleaned[-1] = (cleaned[-1].rstrip() + " " + s).strip()
+                else:
+                    # if it's the first bullet and starts with "and/or/but/with/to", drop it
+                    continue
+            else:
+                cleaned.append(s)
+
+        p["bullets"] = cleaned
+
     return projects
+
 
 
 
