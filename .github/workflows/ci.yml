@@ -23,13 +23,12 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-
+          
       - name: Install dependencies (CI)
         run: |
           python -m pip install --upgrade pip
           python -m pip uninstall -y fitz || true
-          python -m pip install -r requirements.txt
-          python -m pip install PyMuPDF
+          python -m pip install -r requirements-ci.txt
 
       - name: Verify compiled allowlists exist
         shell: bash
@@ -75,4 +74,4 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest -q
+          python -m pytest -q
