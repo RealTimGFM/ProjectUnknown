@@ -12,6 +12,32 @@ OCR_LANGS = os.getenv("OCR_LANGS", "en").split(",")
 OCR_PAGE_LIMIT = int(os.getenv("OCR_PAGE_LIMIT", "3"))
 
 
+@lru_cache(maxsize=1)
+def _load_fitz():
+    """
+    Returns a PyMuPDF module that provides fitz.open (either via `fitz` or `pymupdf`),
+    or None if not available.
+    Never raises at import-time.
+    """
+    # Try `fitz` (normal PyMuPDF import)
+    try:
+        mod = importlib.import_module("fitz")
+        if hasattr(mod, "open"):
+            return mod
+    except Exception:
+        pass
+
+    # Try `pymupdf` (some environments expose this)
+    try:
+        mod = importlib.import_module("pymupdf")
+        if hasattr(mod, "open"):
+            return mod
+    except Exception:
+        pass
+
+    return None
+
+
 def _norm_ws(s: str) -> str:
     if not s:
         return ""
@@ -94,21 +120,26 @@ def read_pdf_text(path: str) -> Tuple[str, int]:
     Return (text, ocr_pages_used).
     Uses PyMuPDF blocks; falls back to page text; optional OCR; optional pdfplumber rescue.
     """
-    mupdf = _get_mupdf()
-    doc = mupdf.open(path)
+    fitz_mod = _load_fitz()
+    if fitz_mod is None:
+        raise ImportError(
+            "PyMuPDF is required for PDF parsing. Install it with:\n"
+            "  pip uninstall fitz -y\n"
+            "  pip install PyMuPDF\n"
+        )
+
+    doc = fitz_mod.open(path)
 
     assembled = []
     ocr_count = 0
 
     for i, page in enumerate(doc):
-        raw = _blocks_to_text(_page_blocks_sorted(page)) or (page.get_text("text") or "")
+        raw = _blocks_to_text(_page_blocks_sorted(page)) or (
+            page.get_text("text") or ""
+        )
 
-        if (
-            USE_OCR
-            and len(_norm_ws(raw)) < 120
-            and ocr_count < OCR_PAGE_LIMIT
-        ):
-            mat = _matrix_prerotate(mupdf, int(getattr(page, "rotation", 0) or 0))
+        if USE_OCR and len(_norm_ws(raw)) < 120 and ocr_count < OCR_PAGE_LIMIT:
+            mat = _matrix_prerotate(fitz_mod, int(getattr(page, "rotation", 0) or 0))
             pix = page.get_pixmap(matrix=mat, alpha=False)
             img = pix.tobytes("png")
             reader = _get_ocr()
